@@ -633,6 +633,6 @@ async def startup_event():
         await db.tasks.insert_many(default_tasks)
         print("Default tasks initialized")
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+#if __name__ == "__main__":
+    #import uvicorn
+    #uvicorn.run(app, host="0.0.0.0", port=8001)//
