@@ -362,28 +362,28 @@ const DepositModal = ({ isOpen, onClose, onDeposit }) => {
         });
         
         // Simulate successful payment after 3 seconds
-        setTimeout(async () => {
-          try {
-            const simulateResponse = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/payments/simulate-deposit-success?transaction_id=${data.transaction_id}`, {
-              method: 'POST',
-              headers: {
-                'Authorization': `Bearer ${token}`,
-              },
-            });
-            
-            const simulateData = await simulateResponse.json();
-            if (simulateData.success) {
-              showNotification({
-                title: 'Payment Successful!',
-                message: simulateData.message,
-                type: 'success'
-              });
-              onDeposit();
-            }
-          } catch (error) {
-            console.error('Simulation error:', error);
-          }
-        }, 3000);
+//        setTimeout(async () => {
+  //        try {
+    //        const simulateResponse = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/payments/simulate-deposit-success?transaction_id=${data.transaction_id}`, {
+      //        method: 'POST',
+        //      headers: {
+          //      'Authorization': `Bearer ${token}`,
+            //  },
+          //  })//;
+            //
+       //     const simulateData = await simulateResponse.json();
+         //   if (simulateData.success) {
+           //   showNotification({
+             //   title: 'Payment Successful!',
+               // message: simulateData.message,
+           //     t//ype: 'success'
+             // });
+              //onDeposit();
+            //}
+         // } catch (error) {
+           // console.error('Simulation error:', error);
+          //}
+        //}, 3000);
         
         onClose();
       } else {
