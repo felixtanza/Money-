@@ -30,10 +30,10 @@ JWT_SECRET = os.environ.get('JWT_SECRET', 'your-secret-key-here') # CHANGE THIS 
 
 # M-Pesa STK Push Credentials
 # You get these from your Safaricom Daraja API application.
-MPESA_CONSUMER_KEY = os.environ.get('MPESA_CONSUMER_KEY', 'default_consumer_key') # Replace with your actual key
-MPESA_CONSUMER_SECRET = os.environ.get('MPESA_CONSUMER_SECRET', 'default_consumer_secret') # Replace with your actual secret
+MPESA_CONSUMER_KEY = os.environ.get('MPESA_CONSUMER_KEY', 'KR1fEeGepC63hqv5sx6ezHcfHi0uAF4WzawZf1d5RwkwEJbh') # Replace with your actual key
+MPESA_CONSUMER_SECRET = os.environ.get('MPESA_CONSUMER_SECRET', 'xBVz6KwtnqoXJ3sXOEOcE0KXp9uPe0PRV1GHXDP40vHRJPnsBQXtbmB2tlJMKquA') # Replace with your actual secret
 MPESA_BUSINESS_SHORTCODE = os.environ.get('MPESA_BUSINESS_SHORTCODE', '174379') # Your Paybill or Till Number
-MPESA_PASSKEY = os.environ.get('MPESA_PASSKEY', 'bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b107ed920d16f34607ff7b') # Your Lipa Na M-Pesa Online Passkey
+MPESA_PASSKEY = os.environ.get('MPESA_PASSKEY', 'bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919') # Your Lipa Na M-Pesa Online Passkey
 
 # This is the public URL M-Pesa will call to send you transaction results.
 # For local development, use an Ngrok HTTPS URL. For production, use your domain.
