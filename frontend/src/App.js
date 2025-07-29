@@ -3,8 +3,6 @@ import './App.css';
 
 // Context for global state management
 const AppContext = createContext();
-
-// Hook to use the app context
 const useAppContext = () => {
   const context = useContext(AppContext);
   if (!context) {
@@ -360,32 +358,8 @@ const DepositModal = ({ isOpen, onClose, onDeposit }) => {
           message: data.message,
           type: 'success'
         });
-        
-        // Simulate successful payment after 3 seconds
-//        setTimeout(async () => {
-  //        try {
-    //        const simulateResponse = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/payments/simulate-deposit-success?transaction_id=${data.transaction_id}`, {
-      //        method: 'POST',
-        //      headers: {
-          //      'Authorization': `Bearer ${token}`,
-            //  },
-          //  })//;
-            //
-       //     const simulateData = await simulateResponse.json();
-         //   if (simulateData.success) {
-           //   showNotification({
-             //   title: 'Payment Successful!',
-               // message: simulateData.message,
-           //     t//ype: 'success'
-             // });
-              //onDeposit();
-            //}
-         // } catch (error) {
-           // console.error('Simulation error:', error);
-          //}
-        //}, 3000);
-        
         onClose();
+        onDeposit();
       } else {
         showNotification({
           title: 'Error',
@@ -854,7 +828,6 @@ const App = () => {
       setUser(JSON.parse(savedUser));
     }
     
-    // Check for referral code in URL
     const urlParams = new URLSearchParams(window.location.search);
     const refCode = urlParams.get('ref');
     if (refCode) {
@@ -876,8 +849,6 @@ const App = () => {
   const toggleTheme = () => {
     const newTheme = theme === 'light' ? 'dark' : 'light';
     setTheme(newTheme);
-    
-    // Save theme preference
     if (user) {
       const token = localStorage.getItem('token');
       fetch(`${process.env.REACT_APP_BACKEND_URL}/api/settings/theme?theme=${newTheme}`, {
