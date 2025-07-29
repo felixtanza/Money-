@@ -15,6 +15,7 @@ import asyncio
 from urllib.parse import urlparse
 import json
 import requests
+from bson import ObjectId  # <-- Added for ObjectId handling
 
 # === Environment Variables ===
 MONGO_URL = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
@@ -106,6 +107,17 @@ def verify_jwt_token(token: str) -> dict:
 
 def generate_referral_code() -> str:
     return secrets.token_urlsafe(8).upper()
+
+def fix_mongo_ids(doc):
+    """Recursively convert ObjectId to string in MongoDB dictionaries/lists."""
+    if isinstance(doc, list):
+        return [fix_mongo_ids(item) for item in doc]
+    elif isinstance(doc, dict):
+        return {k: fix_mongo_ids(v) for k, v in doc.items()}
+    elif isinstance(doc, ObjectId):
+        return str(doc)
+    else:
+        return doc
 
 # === Dependency to Get Current User ===
 async def get_current_user(request: Request):
@@ -229,7 +241,7 @@ async def get_dashboard_stats(current_user: dict = Depends(get_current_user)):
     ).sort("created_at", -1).limit(5).to_list(5)
     return {
         "success": True,
-        "user": {
+        "user": fix_mongo_ids({
             "full_name": current_user['full_name'],
             "wallet_balance": current_user['wallet_balance'],
             "is_activated": current_user['is_activated'],
@@ -240,11 +252,11 @@ async def get_dashboard_stats(current_user: dict = Depends(get_current_user)):
             "task_earnings": current_user.get('task_earnings', 0.0),
             "referral_count": current_user.get('referral_count', 0),
             "referral_code": current_user['referral_code']
-        },
-        "recent_transactions": transactions,
-        "referral_stats": referral_stats,
+        }),
+        "recent_transactions": fix_mongo_ids(transactions),
+        "referral_stats": fix_mongo_ids(referral_stats),
         "task_completions": task_completions,
-        "notifications": notifications
+        "notifications": fix_mongo_ids(notifications)
     }
 
 # === PAYMENT ROUTES ===
@@ -463,7 +475,7 @@ async def get_available_tasks(current_user: dict = Depends(get_current_user)):
     ).to_list(20)
     return {
         "success": True,
-        "tasks": tasks
+        "tasks": fix_mongo_ids(tasks)
     }
 
 @app.post("/api/tasks/complete")
@@ -520,9 +532,9 @@ async def get_referral_stats(current_user: dict = Depends(get_current_user)):
         "activated_referrals": len([r for r in referrals if r['status'] in ['activated', 'rewarded']]),
         "total_earnings": sum(r.get('reward_amount', 0) for r in referrals if r['status'] == 'rewarded'),
         "referral_code": current_user['referral_code'],
-        "referrals": referrals
+        "referrals": fix_mongo_ids(referrals)
     }
-    return {"success": True, "stats": stats}
+    return {"success": True, "stats": fix_mongo_ids(stats)}
 
 async def process_referral_reward(referred_user_id: str, referrer_id: str):
     referral = await db.referrals.find_one({
@@ -580,7 +592,7 @@ async def get_notifications(current_user: dict = Depends(get_current_user)):
     notifications = await db.notifications.find(
         {"$or": [{"user_id": current_user['user_id']}, {"user_id": None}]}
     ).sort("created_at", -1).limit(20).to_list(20)
-    return {"success": True, "notifications": notifications}
+    return {"success": True, "notifications": fix_mongo_ids(notifications)}
 
 @app.put("/api/notifications/{notification_id}/read")
 async def mark_notification_read(notification_id: str, current_user: dict = Depends(get_current_user)):
