@@ -16,12 +16,14 @@ from urllib.parse import urlparse
 import json
 import requests
 from bson import ObjectId
+from dotenv import load_dotenv # Don't forget to install: pip install python-dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # === Environment Variables ===
 # IMPORTANT: These should be set in your actual environment or in a .env file
-# (e.g., using `python-dotenv` library, which you'd need to `pip install python-dotenv`
-# and add `load_dotenv()` at the top of the file if you are using a .env file).
-# For production, always use environment variables, not hardcoded values or .env files directly.
+# For production, always use environment variables, not hardcoded values.
 
 MONGO_URL = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
 JWT_SECRET = os.environ.get('JWT_SECRET', 'your-secret-key-here') # CHANGE THIS IN PRODUCTION!
@@ -152,7 +154,7 @@ async def get_mpesa_access_token() -> Optional[str]:
     Tokens are typically valid for 1 hour (3600 seconds). We refresh a bit early.
     """
     current_time = datetime.utcnow()
-    
+
     # Check if token exists and is still valid (e.g., refresh 5 minutes before actual expiry)
     if _mpesa_access_token_cache["token"] and _mpesa_access_token_cache["expiry"] and \
        _mpesa_access_token_cache["expiry"] > current_time + timedelta(minutes=5):
@@ -226,7 +228,7 @@ async def register(user_data: UserRegister):
     existing_phone = await db.users.find_one({"phone": user_data.phone})
     if existing_phone:
         raise HTTPException(status_code=400, detail="Phone number already registered")
-    
+
     # Basic phone format validation (2547XXXXXXXX)
     if not user_data.phone.startswith("254") or not user_data.phone[3:].isdigit() or len(user_data.phone) != 12:
         raise HTTPException(status_code=400, detail="Invalid phone number format. Use E.164 (e.g., 2547XXXXXXXX).")
@@ -238,7 +240,7 @@ async def register(user_data: UserRegister):
         referrer = await db.users.find_one({"referral_code": user_data.referral_code})
         if referrer:
             referred_by = referrer['user_id']
-    
+
     user_doc = {
         "user_id": user_id,
         "email": user_data.email,
@@ -261,7 +263,7 @@ async def register(user_data: UserRegister):
         "theme": "light"
     }
     await db.users.insert_one(user_doc)
-    
+
     if referred_by:
         await db.referrals.insert_one({
             "referral_id": str(uuid.uuid4()),
@@ -272,7 +274,7 @@ async def register(user_data: UserRegister):
             "activation_date": None,
             "reward_amount": 50.0 # Reward for referrer upon activation
         })
-    
+
     token = create_jwt_token(user_id, user_data.email)
     return {
         "success": True,
@@ -293,12 +295,12 @@ async def login(user_data: UserLogin):
     user = await db.users.find_one({"email": user_data.email})
     if not user or not verify_password(user_data.password, user['password']):
         raise HTTPException(status_code=401, detail="Invalid email or password")
-    
+
     await db.users.update_one(
         {"user_id": user['user_id']},
         {"$set": {"last_login": datetime.utcnow()}}
     )
-    
+
     token = create_jwt_token(user['user_id'], user['email'])
     return {
         "success": True,
@@ -315,19 +317,17 @@ async def login(user_data: UserLogin):
         }
     }
 
----
-
-## Dashboard & User Data
+# --- Dashboard & User Data ---
 
 @app.get("/api/dashboard/stats")
 async def get_dashboard_stats(current_user: dict = Depends(get_current_user)):
     user_id = current_user['user_id']
-    
+
     # Fetch recent transactions
     transactions = await db.transactions.find(
         {"user_id": user_id}
     ).sort("created_at", -1).limit(10).to_list(10)
-    
+
     # Aggregate referral statistics
     referral_stats = await db.referrals.aggregate([
         {"$match": {"referrer_id": user_id}},
@@ -337,15 +337,15 @@ async def get_dashboard_stats(current_user: dict = Depends(get_current_user)):
             "total_reward": {"$sum": "$reward_amount"}
         }}
     ]).to_list(10)
-    
+
     # Count task completions
     task_completions = await db.task_completions.count_documents({"user_id": user_id})
-    
+
     # Fetch recent notifications (user-specific or broadcast)
     notifications = await db.notifications.find(
         {"$or": [{"user_id": user_id}, {"user_id": None}]}
     ).sort("created_at", -1).limit(5).to_list(5)
-    
+
     return {
         "success": True,
         "user": fix_mongo_ids({
@@ -366,9 +366,7 @@ async def get_dashboard_stats(current_user: dict = Depends(get_current_user)):
         "notifications": fix_mongo_ids(notifications)
     }
 
----
-
-## Payment Routes (STK Push for Deposits, B2C for Withdrawals)
+# --- Payment Routes (STK Push for Deposits, B2C for Withdrawals) ---
 
 @app.post("/api/payments/deposit")
 async def initiate_deposit(deposit_data: DepositRequest, current_user: dict = Depends(get_current_user)):
@@ -378,12 +376,12 @@ async def initiate_deposit(deposit_data: DepositRequest, current_user: dict = De
     # Validate phone number format (E.164: 2547XXXXXXXX)
     if not deposit_data.phone.startswith("254") or len(deposit_data.phone) != 12 or not deposit_data.phone[3:].isdigit():
         raise HTTPException(status_code=400, detail="Invalid phone number format. Must be 254xxxxxxxxxx (E.164).")
-    
+
     if deposit_data.amount <= 0:
         raise HTTPException(status_code=400, detail="Deposit amount must be greater than zero.")
 
     transaction_id = str(uuid.uuid4())
-    
+
     # Store the transaction as pending initially, with fields to be updated by M-Pesa callback
     transaction_doc = {
         "transaction_id": transaction_id,
@@ -488,7 +486,7 @@ async def mpesa_stk_callback(request: Request):
         result_code = stk_callback_body['ResultCode']
         checkout_request_id = stk_callback_body['CheckoutRequestID']
         merchant_request_id = stk_callback_body['MerchantRequestID']
-        
+
         # Find the pending transaction using CheckoutRequestID
         transaction = await db.transactions.find_one({
             "CheckoutRequestID": checkout_request_id,
@@ -510,10 +508,10 @@ async def mpesa_stk_callback(request: Request):
             "mpesa_result_code": result_code,
             "mpesa_result_description": stk_callback_body.get('ResultDesc')
         }
-        
+
         if result_code == 0: # Payment was successful
             callback_metadata = stk_callback_body.get('CallbackMetadata', {}).get('Item', [])
-            
+
             mpesa_receipt_number = next((item['Value'] for item in callback_metadata if item['Name'] == 'MpesaReceiptNumber'), None)
             transaction_amount = next((item['Value'] for item in callback_metadata if item['Name'] == 'Amount'), transaction['amount'])
             phone_number_paid = next((item['Value'] for item in callback_metadata if item['Name'] == 'PhoneNumber'), transaction['phone'])
@@ -524,7 +522,7 @@ async def mpesa_stk_callback(request: Request):
                 "amount_received": float(transaction_amount), # Ensure it's a float
                 "phone_number_paid": phone_number_paid
             })
-            
+
             # Update user's wallet balance
             new_balance = user['wallet_balance'] + float(transaction_amount)
             user_update_data = {"wallet_balance": new_balance}
@@ -548,7 +546,7 @@ async def mpesa_stk_callback(request: Request):
         else: # Payment failed or was cancelled by user
             update_fields["status"] = "failed"
             print(f"STK Push Failed: CheckoutRequestID={checkout_request_id}, ResultCode={result_code}, ResultDesc={stk_callback_body.get('ResultDesc')}")
-            
+
             # Create notification for the user about the failure
             await create_notification({
                 "title": "Deposit Failed",
@@ -612,13 +610,13 @@ async def request_withdrawal(withdrawal_data: WithdrawalRequest, current_user: d
     """
     if not current_user['is_activated']:
         raise HTTPException(status_code=400, detail="Account must be activated before withdrawal.")
-    
+
     if withdrawal_data.amount > current_user['wallet_balance']:
         raise HTTPException(status_code=400, detail="Insufficient balance for withdrawal.")
-    
+
     if withdrawal_data.amount < 100: # Minimum withdrawal amount
         raise HTTPException(status_code=400, detail="Minimum withdrawal amount is KSH 100.")
-    
+
     # Validate phone number format (E.164: 2547XXXXXXXX)
     if not withdrawal_data.phone.startswith("254") or len(withdrawal_data.phone) != 12 or not withdrawal_data.phone[3:].isdigit():
         raise HTTPException(status_code=400, detail="Invalid phone number format. Must be 254xxxxxxxxxx (E.164).")
@@ -640,7 +638,7 @@ async def request_withdrawal(withdrawal_data: WithdrawalRequest, current_user: d
         "b2c_originator_id": None
     }
     await db.transactions.insert_one(withdrawal_doc)
-    
+
     # Immediately deduct from user's balance to prevent overdrafts.
     # If B2C fails, the amount will be refunded in the callback.
     await db.users.update_one(
@@ -663,7 +661,7 @@ async def request_withdrawal(withdrawal_data: WithdrawalRequest, current_user: d
 
     # Send the B2C request to M-Pesa
     b2c_response = await send_mpesa_b2c(withdrawal_data.phone, withdrawal_data.amount, transaction_id, b2c_access_token, withdrawal_data.reason)
-    
+
     if b2c_response and not b2c_response.get("error"):
         # B2C request successfully sent to Safaricom. The actual payment status
         # will come via the b2c-callback.
@@ -704,7 +702,7 @@ async def mpesa_b2c_callback(request: Request):
     print(f"M-Pesa B2C Callback Received: {json.dumps(payload, indent=2)}")
 
     result = payload.get("Result", {})
-    
+
     # Extract transaction_id from the ResultParameters (your 'Occassion' value)
     transaction_id = None
     if "ResultParameters" in result and "ResultParameter" in result["ResultParameters"]:
@@ -712,7 +710,7 @@ async def mpesa_b2c_callback(request: Request):
             if param.get("Key") == "Occasion": # Note: M-Pesa might return "Occasion" not "Occassion"
                 transaction_id = param.get("Value")
                 break
-    
+
     # Also try to extract from 'ReferenceData' if 'Occasion' is not directly in ResultParameters
     if not transaction_id and "ReferenceData" in result and "ReferenceItem" in result["ReferenceData"]:
         for item in result["ReferenceData"]["ReferenceItem"]:
@@ -750,7 +748,7 @@ async def mpesa_b2c_callback(request: Request):
         mpesa_receipt_number = next((item['Value'] for item in result.get("ResultParameters", {}).get("ResultParameter", []) if item['Key'] == 'MpesaReceiptNumber'), None)
         if mpesa_receipt_number:
             update_fields["mpesa_receipt"] = mpesa_receipt_number
-        
+
         await db.transactions.update_one(
             {"_id": transaction['_id']},
             {"$set": update_fields}
@@ -763,7 +761,7 @@ async def mpesa_b2c_callback(request: Request):
         print(f"B2C Withdrawal Success: Transaction ID={transaction_id}, Receipt={mpesa_receipt_number}")
     else: # Withdrawal failed
         update_fields["status"] = "failed"
-        
+
         # Refund the user's wallet balance if the withdrawal failed
         current_wallet_balance_before_refund = user['wallet_balance'] # Get current balance before adding back
         await db.users.update_one(
@@ -782,7 +780,7 @@ async def mpesa_b2c_callback(request: Request):
             "user_id": transaction['user_id']
         })
         print(f"B2C Withdrawal Failed: Transaction ID={transaction_id}, ResultCode={result_code}, ResultDesc={result.get('ResultDesc')}")
-    
+
     # Always return 200 OK to M-Pesa to acknowledge receipt of the callback.
     return JSONResponse({"ResultCode": 0, "ResultDesc": "B2C Callback Processed"}, status_code=200)
 
@@ -796,9 +794,7 @@ async def mpesa_b2c_timeout(request: Request):
     # Logic similar to b2c-callback but specifically for timeouts.
     return JSONResponse({"ResultCode": 0, "ResultDesc": "B2C Timeout Processed"}, status_code=200)
 
----
-
-## Task Management
+# --- Task Management ---
 
 @app.on_event("startup")
 async def startup_event():
@@ -861,7 +857,7 @@ async def get_available_tasks(current_user: dict = Depends(get_current_user)):
     """
     if not current_user['is_activated']:
         raise HTTPException(status_code=400, detail="Account must be activated to access tasks.")
-    
+
     now = datetime.utcnow()
     # Find tasks completed by this user in the last 24 hours
     recent_completions = await db.task_completions.find({
@@ -894,11 +890,11 @@ async def complete_task(
     """
     if not current_user['is_activated']:
         raise HTTPException(status_code=400, detail="Account must be activated to complete tasks.")
-    
+
     task = await db.tasks_template.find_one({"template_id": task_id, "is_active": True})
     if not task:
         raise HTTPException(status_code=404, detail="Task not found or inactive.")
-    
+
     now = datetime.utcnow()
     # Check if the user already completed this specific task today
     existing_completion = await db.task_completions.find_one({
@@ -908,7 +904,7 @@ async def complete_task(
     })
     if existing_completion:
         raise HTTPException(status_code=400, detail="Task already completed today. Please try again tomorrow.")
-    
+
     completion_doc = {
         "completion_id": str(uuid.uuid4()),
         "user_id": current_user['user_id'],
@@ -918,24 +914,24 @@ async def complete_task(
         "status": "completed", # Assuming auto-approval for now
         "created_at": datetime.utcnow()
     }
-    
+
     # Handle file uploads if required by the task
     if task['requirements'].get('file_upload', False):
         if not file:
             raise HTTPException(status_code=400, detail="File upload required for this task.")
-        
+
         file_ext = os.path.splitext(file.filename)[-1].lower()
         if file_ext not in [".doc", ".docx", ".pdf", ".jpg", ".jpeg", ".png"]: # Extended allowed file types
             raise HTTPException(status_code=400, detail="Invalid file type. Only DOC, DOCX, PDF, JPG, PNG allowed.")
-        
+
         # Define upload directory and create if it doesn't exist
         upload_dir = "uploads"
         os.makedirs(upload_dir, exist_ok=True)
-        
+
         # Save the file with a unique name
         file_id = str(uuid.uuid4())
         file_path = os.path.join(upload_dir, f"{file_id}{file_ext}")
-        
+
         try:
             with open(file_path, "wb") as f:
                 content = await file.read()
@@ -945,7 +941,7 @@ async def complete_task(
             raise HTTPException(status_code=500, detail=f"Failed to save uploaded file: {e}")
 
     await db.task_completions.insert_one(completion_doc)
-    
+
     # Update user's wallet and earnings
     await db.users.update_one(
         {"user_id": current_user['user_id']},
@@ -957,13 +953,13 @@ async def complete_task(
             }
         }
     )
-    
+
     await create_notification({
         "title": "Task Completed!",
         "message": f"You earned KSH {task['reward']:.2f} for completing '{task['title']}'",
         "user_id": current_user['user_id']
     })
-    
+
     return {
         "success": True,
         "message": f"Task completed! You earned KSH {task['reward']:.2f}.",
@@ -971,9 +967,7 @@ async def complete_task(
         "new_balance": current_user['wallet_balance'] + task['reward'] # Return updated balance for immediate client update
     }
 
----
-
-## Referral System
+# --- Referral System ---
 
 @app.get("/api/referrals/stats")
 async def get_referral_stats(current_user: dict = Depends(get_current_user)):
@@ -981,7 +975,7 @@ async def get_referral_stats(current_user: dict = Depends(get_current_user)):
     Retrieves statistics about a user's referrals.
     """
     referrals = await db.referrals.find({"referrer_id": current_user['user_id']}).to_list(100)
-    
+
     # Calculate aggregated stats
     stats = {
         "total_referrals": len(referrals),
@@ -1002,10 +996,10 @@ async def process_referral_reward(referred_user_id: str, referrer_id: str):
         "referrer_id": referrer_id,
         "status": "pending"
     })
-    
+
     if referral:
         reward_amount = referral['reward_amount']
-        
+
         # Update referral status to 'rewarded'
         await db.referrals.update_one(
             {"referral_id": referral['referral_id']},
@@ -1016,7 +1010,7 @@ async def process_referral_reward(referred_user_id: str, referrer_id: str):
                 }
             }
         )
-        
+
         # Update referrer's wallet balance and earnings
         await db.users.update_one(
             {"user_id": referrer_id},
@@ -1029,7 +1023,7 @@ async def process_referral_reward(referred_user_id: str, referrer_id: str):
                 }
             }
         )
-        
+
         await create_notification({
             "title": "Referral Bonus!",
             "message": f"You earned KSH {reward_amount:.2f} from a successful referral!",
@@ -1037,9 +1031,7 @@ async def process_referral_reward(referred_user_id: str, referrer_id: str):
         })
         print(f"Referral reward processed: User {referrer_id} earned KSH {reward_amount} from {referred_user_id}'s activation.")
 
----
-
-## Notification System
+# --- Notification System ---
 
 async def create_notification(notification_data: dict):
     """
@@ -1087,9 +1079,7 @@ async def mark_notification_read(notification_id: str, current_user: dict = Depe
     )
     return {"success": True, "message": "Notification marked as read."}
 
----
-
-## User Settings
+# --- User Settings ---
 
 @app.put("/api/settings/theme")
 async def update_theme(theme: str, current_user: dict = Depends(get_current_user)):
@@ -1098,16 +1088,14 @@ async def update_theme(theme: str, current_user: dict = Depends(get_current_user
     """
     if theme not in ['light', 'dark']:
         raise HTTPException(status_code=400, detail="Invalid theme. Must be 'light' or 'dark'.")
-    
+
     await db.users.update_one(
         {"user_id": current_user['user_id']},
         {"$set": {"theme": theme}}
     )
     return {"success": True, "message": f"Theme updated to {theme}."}
 
----
-
-## Main Entrypoint
+# --- Main Entrypoint ---
 
 if __name__ == "__main__":
     import uvicorn
