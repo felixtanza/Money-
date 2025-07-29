@@ -37,7 +37,7 @@ MPESA_PASSKEY = os.environ.get('MPESA_PASSKEY', 'bfb279f9aa9bdbcf158e97dd71a467c
 
 # This is the public URL M-Pesa will call to send you transaction results.
 # For local development, use an Ngrok HTTPS URL. For production, use your domain.
-MPESA_CALLBACK_URL = os.environ.get('MPESA_CALLBACK_URL', 'https://your-ngrok-url.ngrok.io/api/payments/stk-callback') # *** MUST BE UPDATED IN PRODUCTION ***
+MPESA_CALLBACK_URL = os.environ.get('MPESA_CALLBACK_URL', 'https://money-makingplatformbyequitybank.onrender.com/api/payments/stk-callback') # https://money-makingplatformbyequitybank.onrender.com*** MUST BE UPDATED IN PRODUCTION ***
 
 # M-Pesa B2C (Withdrawal) Credentials
 # MPESA_INITIATOR is the username for B2C (usually your paybill number's shortcode)
