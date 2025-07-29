@@ -829,7 +829,7 @@ const Dashboard = ({ user, onLogout }) => {
               <div className="tasks-grid">
                 {tasks.map(task => (
                   <TaskCard
-                    key={task.task_id}
+                    key={task.task_id || task.template_id}
                     task={task}
                     onComplete={completeTask}
                   />
