@@ -16,12 +16,12 @@ from urllib.parse import urlparse
 import json
 import requests
 from bson import ObjectId
-from dotenv import load_dotenv # Don't forget to install: pip install python-dotenv
+from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
 
-# === Environment Variables ===
+# --- Environment Variables ---
 # IMPORTANT: These should be set in your actual environment or in a .env file
 # For production, always use environment variables, not hardcoded values.
 
@@ -30,14 +30,14 @@ JWT_SECRET = os.environ.get('JWT_SECRET', 'your-secret-key-here') # CHANGE THIS 
 
 # M-Pesa STK Push Credentials
 # You get these from your Safaricom Daraja API application.
-MPESA_CONSUMER_KEY = os.environ.get('MPESA_CONSUMER_KEY', 'KR1fEeGepC63hqv5sx6ezHcfHi0uAF4WzawZf1d5RwkwEJbh') # Replace with your actual key
-MPESA_CONSUMER_SECRET = os.environ.get('MPESA_CONSUMER_SECRET', 'xBVz6KwtnqoXJ3sXOEOcE0KXp9uPe0PRV1GHXDP40vHRJPnsBQXtbmB2tlJMKquA') # Replace with your actual secret
+MPESA_CONSUMER_KEY = os.environ.get('MPESA_CONSUMER_KEY', 'KR1fEeGepC63hqv5sx6ezHcfHi0uAF4WzawZf1d5RwkwEJbh') # Your actual consumer key
+MPESA_CONSUMER_SECRET = os.environ.get('MPESA_CONSUMER_SECRET', 'xBVz6KwtnqoXJ3sXOEOcE0KXp9uPe0PRV1GHXDP40vHRJPnsBQXtbmB2tlJMKquA') # Your actual consumer secret
 MPESA_BUSINESS_SHORTCODE = os.environ.get('MPESA_BUSINESS_SHORTCODE', '174379') # Your Paybill or Till Number
 MPESA_PASSKEY = os.environ.get('MPESA_PASSKEY', 'bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919') # Your Lipa Na M-Pesa Online Passkey
 
 # This is the public URL M-Pesa will call to send you transaction results.
 # For local development, use an Ngrok HTTPS URL. For production, use your domain.
-MPESA_CALLBACK_URL = os.environ.get('MPESA_CALLBACK_URL', 'https://your-ngrok-url.ngrok.io/api/payments/stk-callback') # *** MUST BE UPDATED ***
+MPESA_CALLBACK_URL = os.environ.get('MPESA_CALLBACK_URL', 'https://your-ngrok-url.ngrok.io/api/payments/stk-callback') # *** MUST BE UPDATED IN PRODUCTION ***
 
 # M-Pesa B2C (Withdrawal) Credentials
 # MPESA_INITIATOR is the username for B2C (usually your paybill number's shortcode)
@@ -50,12 +50,11 @@ MPESA_B2C_URL = "https://sandbox.safaricom.co.ke/mpesa/b2c/v1/paymentrequest" # 
 MPESA_B2C_RESULT_URL = os.environ.get('MPESA_B2C_RESULT_URL', 'https://yourdomain.com/api/payments/b2c-callback')
 MPESA_B2C_TIMEOUT_URL = os.environ.get('MPESA_B2C_TIMEOUT_URL', 'https://yourdomain.com/api/payments/b2c-timeout')
 
-
 ACTIVATION_AMOUNT = 500.0 # Constant for activation amount
 
 app = FastAPI(title="EarnPlatform API", version="1.0.0")
 
-# === CORS Middleware ===
+# --- CORS Middleware ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], # Consider restricting this to your frontend domain(s) in production
@@ -64,11 +63,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# === MongoDB Connection ===
+# --- MongoDB Connection ---
 client = AsyncIOMotorClient(MONGO_URL)
 db = client.earnplatform
 
-# === Pydantic Models ===
+# --- Pydantic Models ---
 class UserRegister(BaseModel):
     email: EmailStr
     password: str
@@ -105,7 +104,7 @@ class NotificationCreate(BaseModel):
     message: str
     user_id: Optional[str] = None  # None means broadcast to all users
 
-# === Utility Functions ===
+# --- Utility Functions ---
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
@@ -171,7 +170,15 @@ async def get_mpesa_access_token() -> Optional[str]:
         response.raise_for_status() # Raises HTTPError for 4xx/5xx responses
         token_data = response.json()
         token = token_data.get("access_token")
-        expires_in = token_data.get("expires_in", 3599) # Default to 1 hour if not provided
+
+        # --- CORRECTED AREA: Ensure expires_in is an integer ---
+        expires_in_raw = token_data.get("expires_in", 3599)
+        try:
+            expires_in = int(expires_in_raw)
+        except (ValueError, TypeError):
+            print(f"Warning: 'expires_in' from M-Pesa was not an integer: {expires_in_raw}. Defaulting to 3599 seconds.")
+            expires_in = 3599 # Fallback if conversion fails
+        # --- END CORRECTED AREA ---
 
         if token:
             _mpesa_access_token_cache["token"] = token
@@ -206,7 +213,7 @@ def generate_b2c_security_credential(initiator_password: str) -> str:
     return MPESA_SECURITY_CREDENTIAL
 
 
-# === Dependency to Get Current User ===
+# --- Dependency to Get Current User ---
 async def get_current_user(request: Request):
     token = request.headers.get('Authorization')
     if not token:
@@ -709,14 +716,14 @@ async def mpesa_b2c_callback(request: Request):
         for param in result["ResultParameters"]["ResultParameter"]:
             if param.get("Key") == "Occasion": # Note: M-Pesa might return "Occasion" not "Occassion"
                 transaction_id = param.get("Value")
-                break
+                break # Found transaction_id, exit loop
 
     # Also try to extract from 'ReferenceData' if 'Occasion' is not directly in ResultParameters
     if not transaction_id and "ReferenceData" in result and "ReferenceItem" in result["ReferenceData"]:
         for item in result["ReferenceData"]["ReferenceItem"]:
             if item.get("Key") == "Occasion":
                 transaction_id = item.get("Value")
-                break
+                break # Found transaction_id, exit loop
 
     if not transaction_id:
         print("Error: B2C callback received without identifiable transaction_id ('Occasion').")
