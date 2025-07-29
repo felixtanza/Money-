@@ -20,9 +20,9 @@ from bson import ObjectId  # <-- Added for ObjectId handling
 # === Environment Variables ===
 MONGO_URL = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
 JWT_SECRET = os.environ.get('JWT_SECRET', 'your-secret-key-here')
-MPESA_CONSUMER_KEY = os.environ.get('MPESA_CONSUMER_KEY', '')
-MPESA_CONSUMER_SECRET = os.environ.get('MPESA_CONSUMER_SECRET', '')
-MPESA_BUSINESS_SHORTCODE = os.environ.get('MPESA_BUSINESS_SHORTCODE', '')
+MPESA_CONSUMER_KEY = os.environ.get('MPESA_CONSUMER_KEY', 'KR1fEeGepC63hqv5sx6ezHcfHi0uAF4WzawZf1d5RwkwEJbh')
+MPESA_CONSUMER_SECRET = os.environ.get('MPESA_CONSUMER_SECRET', 'xBVz6KwtnqoXJ3sXOEOcE0KXp9uPe0PRV1GHXDP40vHRJPnsBQXtbmB2tlJMKquA')
+MPESA_BUSINESS_SHORTCODE = os.environ.get('MPESA_BUSINESS_SHORTCODE', '174379')
 MPESA_INITIATOR = os.environ.get('MPESA_INITIATOR', '')
 MPESA_SECURITY_CREDENTIAL = os.environ.get('MPESA_SECURITY_CREDENTIAL', '')
 MPESA_B2C_URL = "https://sandbox.safaricom.co.ke/mpesa/b2c/v1/paymentrequest"
