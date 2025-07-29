@@ -43,9 +43,74 @@ const AuthPage = ({ onLogin }) => {
   });
   const [loading, setLoading] = useState(false);
   const { showNotification } = useAppContext();
+  const [referralCodeLocked, setReferralCodeLocked] = useState(false);
+
+  // Auto-fill referral_code from URL and lock field
+  useEffect(() => {
+    if (!isLogin) {
+      const urlParams = new URLSearchParams(window.location.search);
+      const referralFromUrl = urlParams.get('ref');
+      if (referralFromUrl) {
+        setFormData((prev) => ({
+          ...prev,
+          referral_code: referralFromUrl
+        }));
+        setReferralCodeLocked(true);
+      } else {
+        setReferralCodeLocked(false);
+        setFormData((prev) => ({
+          ...prev,
+          referral_code: ''
+        }));
+      }
+    }
+    // eslint-disable-next-line
+  }, [isLogin]);
+
+  // Input validation patterns
+  const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const phonePattern = /^254\d{9}$/;
+  const passwordPattern = /^.{6,}$/;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    // Registration input validation
+    if (!isLogin) {
+      if (!formData.full_name.trim()) {
+        showNotification({
+          title: 'Validation Error',
+          message: 'Full Name is required.',
+          type: 'error'
+        });
+        return;
+      }
+      if (!phonePattern.test(formData.phone)) {
+        showNotification({
+          title: 'Validation Error',
+          message: 'Phone number must be in format 254XXXXXXXXX.',
+          type: 'error'
+        });
+        return;
+      }
+    }
+    if (!emailPattern.test(formData.email)) {
+      showNotification({
+        title: 'Validation Error',
+        message: 'Please enter a valid email address.',
+        type: 'error'
+      });
+      return;
+    }
+    if (!passwordPattern.test(formData.password)) {
+      showNotification({
+        title: 'Validation Error',
+        message: 'Password must be at least 6 characters.',
+        type: 'error'
+      });
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -96,13 +161,13 @@ const AuthPage = ({ onLogin }) => {
         </div>
 
         <div className="auth-tabs">
-          <button 
+          <button
             className={`tab ${isLogin ? 'active' : ''}`}
             onClick={() => setIsLogin(true)}
           >
             Login
           </button>
-          <button 
+          <button
             className={`tab ${!isLogin ? 'active' : ''}`}
             onClick={() => setIsLogin(false)}
           >
@@ -118,9 +183,10 @@ const AuthPage = ({ onLogin }) => {
                   type="text"
                   placeholder="Full Name"
                   value={formData.full_name}
-                  onChange={(e) => setFormData({...formData, full_name: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
                   required
                   className="form-input"
+                  autoComplete="name"
                 />
               </div>
               <div className="form-group">
@@ -128,9 +194,11 @@ const AuthPage = ({ onLogin }) => {
                   type="tel"
                   placeholder="Phone Number (254XXXXXXXXX)"
                   value={formData.phone}
-                  onChange={(e) => setFormData({...formData, phone: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                   required
                   className="form-input"
+                  pattern="254\d{9}"
+                  autoComplete="tel"
                 />
               </div>
               <div className="form-group">
@@ -138,32 +206,38 @@ const AuthPage = ({ onLogin }) => {
                   type="text"
                   placeholder="Referral Code (Optional)"
                   value={formData.referral_code}
-                  onChange={(e) => setFormData({...formData, referral_code: e.target.value})}
-                  className="form-input"
+                  readOnly={referralCodeLocked}
+                  disabled={referralCodeLocked}
+                  className={`form-input ${referralCodeLocked ? 'locked' : ''}`}
+                  style={referralCodeLocked ? { background: '#f0f0f0', cursor: 'not-allowed' } : {}}
                 />
               </div>
             </>
           )}
-          
+
           <div className="form-group">
             <input
               type="email"
               placeholder="Email"
               value={formData.email}
-              onChange={(e) => setFormData({...formData, email: e.target.value})}
+              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
               required
               className="form-input"
+              autoComplete="email"
+              pattern="^[^\s@]+@[^\s@]+\.[^\s@]+$"
             />
           </div>
-          
+
           <div className="form-group">
             <input
               type="password"
               placeholder="Password"
               value={formData.password}
-              onChange={(e) => setFormData({...formData, password: e.target.value})}
+              onChange={(e) => setFormData({ ...formData, password: e.target.value })}
               required
               className="form-input"
+              autoComplete={isLogin ? "current-password" : "new-password"}
+              minLength={6}
             />
           </div>
 
@@ -184,7 +258,7 @@ const AuthPage = ({ onLogin }) => {
   );
 };
 
-// Dashboard Components
+// Dashboard Components (unchanged, copy from your previous code)
 const WalletCard = ({ user, onDeposit, onWithdraw }) => {
   return (
     <div className="wallet-card animated-card">
@@ -194,31 +268,27 @@ const WalletCard = ({ user, onDeposit, onWithdraw }) => {
           {user.is_activated ? '✅ Activated' : '⏳ Pending Activation'}
         </div>
       </div>
-      
       <div className="wallet-balance">
         <span className="currency">KSH</span>
         <span className="amount">{user.wallet_balance.toFixed(2)}</span>
       </div>
-
       {!user.is_activated && (
         <div className="activation-notice">
           <p>Deposit KSH {user.activation_amount} to activate your account and start earning!</p>
         </div>
       )}
-
       <div className="wallet-actions">
         <button className="btn-deposit" onClick={onDeposit}>
           💳 Deposit
         </button>
-        <button 
-          className="btn-withdraw" 
+        <button
+          className="btn-withdraw"
           onClick={onWithdraw}
           disabled={!user.is_activated || user.wallet_balance < 100}
         >
           💸 Withdraw
         </button>
       </div>
-
       <div className="wallet-stats">
         <div className="stat">
           <span className="stat-label">Total Earned</span>
@@ -250,10 +320,8 @@ const TaskCard = ({ task, onComplete, completed = false }) => {
         <span className="task-icon">{getTaskIcon(task.type)}</span>
         <span className="task-reward">+KSH {task.reward}</span>
       </div>
-      
       <h4 className="task-title">{task.title}</h4>
       <p className="task-description">{task.description}</p>
-      
       <div className="task-footer">
         <span className="task-type">{task.type.toUpperCase()}</span>
         {!completed && (
@@ -285,7 +353,6 @@ const ReferralCard = ({ user, stats }) => {
         <h3>👥 Referral Program</h3>
         <div className="referral-reward">KSH 50 per referral</div>
       </div>
-
       <div className="referral-stats">
         <div className="stat">
           <span className="stat-value">{user.referral_count}</span>
@@ -296,7 +363,6 @@ const ReferralCard = ({ user, stats }) => {
           <span className="stat-label">Referral Earnings</span>
         </div>
       </div>
-
       <div className="referral-link-section">
         <label>Your Referral Code:</label>
         <div className="referral-code-container">
@@ -304,7 +370,6 @@ const ReferralCard = ({ user, stats }) => {
           <button className="btn-copy" onClick={copyReferralLink}>Copy Link</button>
         </div>
       </div>
-
       <div className="referral-encouragement">
         <p>🚀 Share your referral link and earn KSH 50 for each friend who joins and activates their account!</p>
         <p>💡 The more you refer, the more you earn!</p>
@@ -325,15 +390,25 @@ const StatsCard = ({ title, value, icon, color }) => {
   );
 };
 
-// Modal Components
+// Modal Components (unchanged, copy from your previous code)
 const DepositModal = ({ isOpen, onClose, onDeposit }) => {
   const [amount, setAmount] = useState('500');
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const { showNotification } = useAppContext();
+  const phonePattern = /^254\d{9}$/;
 
   const handleDeposit = async (e) => {
     e.preventDefault();
+
+    if (!phonePattern.test(phone)) {
+      showNotification({
+        title: 'Validation Error',
+        message: 'Phone number must be in format 254XXXXXXXXX.',
+        type: 'error'
+      });
+      return;
+    }
     setLoading(true);
 
     try {
@@ -387,7 +462,6 @@ const DepositModal = ({ isOpen, onClose, onDeposit }) => {
           <h3>💳 Deposit Money</h3>
           <button className="modal-close" onClick={onClose}>×</button>
         </div>
-        
         <form onSubmit={handleDeposit}>
           <div className="form-group">
             <label>Amount (KSH)</label>
@@ -401,7 +475,6 @@ const DepositModal = ({ isOpen, onClose, onDeposit }) => {
               className="form-input"
             />
           </div>
-          
           <div className="form-group">
             <label>M-Pesa Phone Number</label>
             <input
@@ -411,14 +484,13 @@ const DepositModal = ({ isOpen, onClose, onDeposit }) => {
               onChange={(e) => setPhone(e.target.value)}
               required
               className="form-input"
+              pattern="254\d{9}"
             />
           </div>
-
           <div className="deposit-info">
             <p>📱 You will receive an M-Pesa prompt on your phone</p>
             <p>⏱️ Complete the payment within 5 minutes</p>
           </div>
-
           <button type="submit" className="btn-primary" disabled={loading}>
             {loading ? 'Processing...' : 'Initiate Deposit'}
           </button>
@@ -433,9 +505,19 @@ const WithdrawModal = ({ isOpen, onClose, user, onWithdraw }) => {
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const { showNotification } = useAppContext();
+  const phonePattern = /^254\d{9}$/;
 
   const handleWithdraw = async (e) => {
     e.preventDefault();
+
+    if (!phonePattern.test(phone)) {
+      showNotification({
+        title: 'Validation Error',
+        message: 'Phone number must be in format 254XXXXXXXXX.',
+        type: 'error'
+      });
+      return;
+    }
     setLoading(true);
 
     try {
@@ -489,7 +571,6 @@ const WithdrawModal = ({ isOpen, onClose, user, onWithdraw }) => {
           <h3>💸 Withdraw Money</h3>
           <button className="modal-close" onClick={onClose}>×</button>
         </div>
-        
         <form onSubmit={handleWithdraw}>
           <div className="form-group">
             <label>Amount (KSH)</label>
@@ -505,7 +586,6 @@ const WithdrawModal = ({ isOpen, onClose, user, onWithdraw }) => {
             />
             <small>Available: KSH {user.wallet_balance.toFixed(2)} | Minimum: KSH 100</small>
           </div>
-          
           <div className="form-group">
             <label>M-Pesa Phone Number</label>
             <input
@@ -515,14 +595,13 @@ const WithdrawModal = ({ isOpen, onClose, user, onWithdraw }) => {
               onChange={(e) => setPhone(e.target.value)}
               required
               className="form-input"
+              pattern="254\d{9}"
             />
           </div>
-
           <div className="withdraw-info">
             <p>⏳ Processing time: 24-48 hours</p>
             <p>💰 Money will be sent to your M-Pesa account</p>
           </div>
-
           <button type="submit" className="btn-primary" disabled={loading}>
             {loading ? 'Processing...' : 'Request Withdrawal'}
           </button>
@@ -532,7 +611,7 @@ const WithdrawModal = ({ isOpen, onClose, user, onWithdraw }) => {
   );
 };
 
-// Main Dashboard Component
+// Main Dashboard Component (unchanged, copy from your previous code)
 const Dashboard = ({ user, onLogout }) => {
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [dashboardData, setDashboardData] = useState(null);
@@ -545,6 +624,7 @@ const Dashboard = ({ user, onLogout }) => {
   useEffect(() => {
     fetchDashboardData();
     fetchTasks();
+    // eslint-disable-next-line
   }, []);
 
   const fetchDashboardData = async () => {
@@ -555,7 +635,6 @@ const Dashboard = ({ user, onLogout }) => {
           'Authorization': `Bearer ${token}`,
         },
       });
-
       const data = await response.json();
       if (data.success) {
         setDashboardData(data);
@@ -575,7 +654,6 @@ const Dashboard = ({ user, onLogout }) => {
           'Authorization': `Bearer ${token}`,
         },
       });
-
       const data = await response.json();
       if (data.success) {
         setTasks(data.tasks);
@@ -599,7 +677,6 @@ const Dashboard = ({ user, onLogout }) => {
           completion_data: { completed_at: new Date().toISOString() }
         }),
       });
-
       const data = await response.json();
       if (data.success) {
         showNotification({
@@ -658,21 +735,20 @@ const Dashboard = ({ user, onLogout }) => {
             </button>
           </div>
         </div>
-        
         <nav className="dashboard-nav">
-          <button 
+          <button
             className={`nav-item ${currentPage === 'dashboard' ? 'active' : ''}`}
             onClick={() => setCurrentPage('dashboard')}
           >
             📊 Dashboard
           </button>
-          <button 
+          <button
             className={`nav-item ${currentPage === 'tasks' ? 'active' : ''}`}
             onClick={() => setCurrentPage('tasks')}
           >
             ⭐ Tasks
           </button>
-          <button 
+          <button
             className={`nav-item ${currentPage === 'referrals' ? 'active' : ''}`}
             onClick={() => setCurrentPage('referrals')}
           >
@@ -680,7 +756,6 @@ const Dashboard = ({ user, onLogout }) => {
           </button>
         </nav>
       </header>
-
       <main className="dashboard-main">
         {currentPage === 'dashboard' && dashboardData && (
           <div className="dashboard-content">
@@ -688,47 +763,43 @@ const Dashboard = ({ user, onLogout }) => {
               <h2>Welcome back, {dashboardData.user.full_name}! 👋</h2>
               <p>Ready to earn more money today?</p>
             </div>
-
             <div className="stats-grid">
-              <StatsCard 
-                title="Wallet Balance" 
-                value={`KSH ${dashboardData.user.wallet_balance.toFixed(2)}`} 
-                icon="💰" 
-                color="green" 
+              <StatsCard
+                title="Wallet Balance"
+                value={`KSH ${dashboardData.user.wallet_balance.toFixed(2)}`}
+                icon="💰"
+                color="green"
               />
-              <StatsCard 
-                title="Total Earned" 
-                value={`KSH ${dashboardData.user.total_earned.toFixed(2)}`} 
-                icon="📈" 
-                color="blue" 
+              <StatsCard
+                title="Total Earned"
+                value={`KSH ${dashboardData.user.total_earned.toFixed(2)}`}
+                icon="📈"
+                color="blue"
               />
-              <StatsCard 
-                title="Referrals" 
-                value={dashboardData.user.referral_count} 
-                icon="👥" 
-                color="purple" 
+              <StatsCard
+                title="Referrals"
+                value={dashboardData.user.referral_count}
+                icon="👥"
+                color="purple"
               />
-              <StatsCard 
-                title="Tasks Completed" 
-                value={dashboardData.task_completions} 
-                icon="✅" 
-                color="orange" 
+              <StatsCard
+                title="Tasks Completed"
+                value={dashboardData.task_completions}
+                icon="✅"
+                color="orange"
               />
             </div>
-
             <div className="dashboard-grid">
-              <WalletCard 
+              <WalletCard
                 user={dashboardData.user}
                 onDeposit={() => setShowDepositModal(true)}
                 onWithdraw={() => setShowWithdrawModal(true)}
               />
-              
-              <ReferralCard 
+              <ReferralCard
                 user={dashboardData.user}
                 stats={dashboardData.referral_stats}
               />
             </div>
-
             {!dashboardData.user.is_activated && (
               <div className="activation-banner animated-card">
                 <h3>🚀 Activate Your Account</h3>
@@ -740,14 +811,12 @@ const Dashboard = ({ user, onLogout }) => {
             )}
           </div>
         )}
-
         {currentPage === 'tasks' && (
           <div className="tasks-content">
             <div className="tasks-header">
               <h2>Available Tasks</h2>
               <p>Complete tasks to earn money and increase your wallet balance!</p>
             </div>
-
             {!user.is_activated ? (
               <div className="activation-required animated-card">
                 <h3>Account Activation Required</h3>
@@ -759,9 +828,9 @@ const Dashboard = ({ user, onLogout }) => {
             ) : (
               <div className="tasks-grid">
                 {tasks.map(task => (
-                  <TaskCard 
-                    key={task.task_id} 
-                    task={task} 
+                  <TaskCard
+                    key={task.task_id}
+                    task={task}
                     onComplete={completeTask}
                   />
                 ))}
@@ -775,14 +844,12 @@ const Dashboard = ({ user, onLogout }) => {
             )}
           </div>
         )}
-
         {currentPage === 'referrals' && dashboardData && (
           <div className="referrals-content">
-            <ReferralCard 
+            <ReferralCard
               user={dashboardData.user}
               stats={dashboardData.referral_stats}
             />
-            
             <div className="referral-tips animated-card">
               <h3>💡 Referral Tips</h3>
               <ul>
@@ -795,14 +862,12 @@ const Dashboard = ({ user, onLogout }) => {
           </div>
         )}
       </main>
-
-      <DepositModal 
+      <DepositModal
         isOpen={showDepositModal}
         onClose={() => setShowDepositModal(false)}
         onDeposit={handleDeposit}
       />
-
-      <WithdrawModal 
+      <WithdrawModal
         isOpen={showWithdrawModal}
         onClose={() => setShowWithdrawModal(false)}
         user={dashboardData?.user || user}
@@ -823,17 +888,14 @@ const App = () => {
     // Check for existing session
     const token = localStorage.getItem('token');
     const savedUser = localStorage.getItem('user');
-    
     if (token && savedUser) {
       setUser(JSON.parse(savedUser));
     }
-    
     const urlParams = new URLSearchParams(window.location.search);
     const refCode = urlParams.get('ref');
     if (refCode) {
       localStorage.setItem('referral_code', refCode);
     }
-    
     setLoading(false);
   }, []);
 
@@ -886,10 +948,10 @@ const App = () => {
   }
 
   return (
-    <AppContext.Provider value={{ 
-      showNotification, 
-      theme, 
-      toggleTheme 
+    <AppContext.Provider value={{
+      showNotification,
+      theme,
+      toggleTheme
     }}>
       <div className={`app ${theme}`}>
         {!user ? (
@@ -897,7 +959,6 @@ const App = () => {
         ) : (
           <Dashboard user={user} onLogout={handleLogout} />
         )}
-
         <div className="notification-container">
           {notifications.map(notification => (
             <Notification
