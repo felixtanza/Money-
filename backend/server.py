@@ -285,47 +285,6 @@ async def initiate_deposit(deposit_data: DepositRequest, current_user: dict = De
         "phone": deposit_data.phone
     }
 
-# --- COMMENTED OUT: SIMULATE DEPOSIT SUCCESS (DO NOT USE IN PRODUCTION) ---
-# @app.post("/api/payments/simulate-deposit-success")
-# async def simulate_deposit_success(transaction_id: str, current_user: dict = Depends(get_current_user)):
-#     """Simulate successful M-Pesa deposit for testing (commented out for production)"""
-#     transaction = await db.transactions.find_one({"transaction_id": transaction_id, "user_id": current_user['user_id']})
-#     if not transaction:
-#         raise HTTPException(status_code=404, detail="Transaction not found")
-#     if transaction['status'] != 'pending':
-#         raise HTTPException(status_code=400, detail="Transaction already processed")
-#     await db.transactions.update_one(
-#         {"transaction_id": transaction_id},
-#         {
-#             "$set": {
-#                 "status": "completed",
-#                 "completed_at": datetime.utcnow(),
-#                 "mpesa_receipt": f"MPESA{secrets.token_hex(4).upper()}"
-#             }
-#         }
-#     )
-#     new_balance = current_user['wallet_balance'] + transaction['amount']
-#     update_data = {"wallet_balance": new_balance}
-#     if not current_user['is_activated'] and transaction['amount'] >= current_user.get('activation_amount', 500.0):
-#         update_data['is_activated'] = True
-#         if current_user.get('referred_by'):
-#             await process_referral_reward(current_user['user_id'], current_user['referred_by'])
-#     await db.users.update_one(
-#         {"user_id": current_user['user_id']},
-#         {"$set": update_data}
-#     )
-#     await create_notification({
-#         "title": "Deposit Successful!",
-#         "message": f"Your deposit of KSH {transaction['amount']} has been processed successfully.",
-#         "user_id": current_user['user_id']
-#     })
-#     return {
-#         "success": True,
-#         "message": f"Deposit of KSH {transaction['amount']} completed successfully!",
-#         "new_balance": new_balance,
-#         "is_activated": update_data.get('is_activated', current_user['is_activated'])
-#     }
-
 @app.post("/api/payments/mpesa-callback")
 async def mpesa_callback(request: Request):
     payload = await request.json()
@@ -462,44 +421,118 @@ async def mpesa_b2c_callback(request: Request):
         })
     return {"success": True}
 
-# === Task System ===
+# === Task Template System & Daily Reset ===
+
+@app.on_event("startup")
+async def startup_event():
+    template_count = await db.tasks_template.count_documents({})
+    if template_count == 0:
+        templates = [
+            {
+                "template_id": str(uuid.uuid4()),
+                "title": "Complete Daily Survey",
+                "description": "Answer 10 questions about consumer preferences",
+                "reward": 25.0,
+                "type": "survey",
+                "requirements": {"questions": 10, "time_limit": 300, "file_upload": False},
+                "is_active": True,
+                "created_at": datetime.utcnow()
+            },
+            {
+                "template_id": str(uuid.uuid4()),
+                "title": "Watch Advertisement",
+                "description": "Watch a 30-second advertisement completely",
+                "reward": 5.0,
+                "type": "ad",
+                "requirements": {"duration": 30, "interaction": True, "file_upload": False},
+                "is_active": True,
+                "created_at": datetime.utcnow()
+            },
+            {
+                "template_id": str(uuid.uuid4()),
+                "title": "Write Online Article",
+                "description": "Write a 300-word article and upload as DOC or PDF.",
+                "reward": 50.0,
+                "type": "writing",
+                "requirements": {"min_words": 300, "file_upload": True},
+                "is_active": True,
+                "created_at": datetime.utcnow()
+            },
+            {
+                "template_id": str(uuid.uuid4()),
+                "title": "Share on Social Media",
+                "description": "Share our platform on your social media",
+                "reward": 15.0,
+                "type": "social",
+                "requirements": {"platforms": ["facebook", "twitter", "whatsapp"], "file_upload": False},
+                "is_active": True,
+                "created_at": datetime.utcnow()
+            }
+        ]
+        await db.tasks_template.insert_many(templates)
+        print("Task templates initialized")
+
 @app.get("/api/tasks/available")
 async def get_available_tasks(current_user: dict = Depends(get_current_user)):
     if not current_user['is_activated']:
         raise HTTPException(status_code=400, detail="Account must be activated to access tasks")
-    completed_tasks = await db.task_completions.find(
-        {"user_id": current_user['user_id']}
-    ).distinct("task_id")
-    tasks = await db.tasks.find(
-        {"task_id": {"$nin": completed_tasks}, "is_active": True}
-    ).to_list(20)
+    now = datetime.utcnow()
+    recent_completions = await db.task_completions.find({
+        "user_id": current_user['user_id'],
+        "created_at": {"$gte": now - timedelta(hours=24)}
+    }).distinct("template_id")
+    tasks = await db.tasks_template.find({
+        "template_id": {"$nin": recent_completions},
+        "is_active": True
+    }).to_list(20)
     return {
         "success": True,
         "tasks": fix_mongo_ids(tasks)
     }
 
 @app.post("/api/tasks/complete")
-async def complete_task(completion_data: TaskCompletion, current_user: dict = Depends(get_current_user)):
+async def complete_task(
+    request: Request,
+    task_id: str = Form(...),
+    completion_data: str = Form(None),
+    file: UploadFile = File(None),
+    current_user: dict = Depends(get_current_user)
+):
     if not current_user['is_activated']:
         raise HTTPException(status_code=400, detail="Account must be activated to complete tasks")
-    task = await db.tasks.find_one({"task_id": completion_data.task_id, "is_active": True})
+    task = await db.tasks_template.find_one({"template_id": task_id, "is_active": True})
     if not task:
         raise HTTPException(status_code=404, detail="Task not found or inactive")
+    now = datetime.utcnow()
     existing_completion = await db.task_completions.find_one({
         "user_id": current_user['user_id'],
-        "task_id": completion_data.task_id
+        "template_id": task_id,
+        "created_at": {"$gte": now - timedelta(hours=24)}
     })
     if existing_completion:
-        raise HTTPException(status_code=400, detail="Task already completed")
+        raise HTTPException(status_code=400, detail="Task already completed today")
     completion_doc = {
         "completion_id": str(uuid.uuid4()),
         "user_id": current_user['user_id'],
-        "task_id": completion_data.task_id,
-        "completion_data": completion_data.completion_data,
+        "template_id": task_id,
+        "completion_data": json.loads(completion_data) if completion_data else {},
         "reward_amount": task['reward'],
         "status": "completed",
         "created_at": datetime.utcnow()
     }
+    if task['requirements'].get('file_upload', False):
+        if not file:
+            raise HTTPException(status_code=400, detail="File upload required for this task")
+        file_ext = os.path.splitext(file.filename)[-1].lower()
+        if file_ext not in [".doc", ".docx", ".pdf"]:
+            raise HTTPException(status_code=400, detail="File must be DOC, DOCX, or PDF.")
+        file_id = str(uuid.uuid4())
+        file_path = f"uploads/{file_id}_{file.filename}"
+        os.makedirs("uploads", exist_ok=True)
+        with open(file_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+        completion_doc['file_path'] = file_path
     await db.task_completions.insert_one(completion_doc)
     await db.users.update_one(
         {"user_id": current_user['user_id']},
@@ -612,56 +645,6 @@ async def update_theme(theme: str, current_user: dict = Depends(get_current_user
         {"$set": {"theme": theme}}
     )
     return {"success": True, "message": f"Theme updated to {theme}"}
-
-# === Startup: Default Tasks ===
-@app.on_event("startup")
-async def startup_event():
-    task_count = await db.tasks.count_documents({})
-    if task_count == 0:
-        default_tasks = [
-            {
-                "task_id": str(uuid.uuid4()),
-                "title": "Complete Daily Survey",
-                "description": "Answer 10 questions about consumer preferences",
-                "reward": 25.0,
-                "type": "survey",
-                "requirements": {"questions": 10, "time_limit": 300},
-                "is_active": True,
-                "created_at": datetime.utcnow()
-            },
-            {
-                "task_id": str(uuid.uuid4()),
-                "title": "Watch Advertisement",
-                "description": "Watch a 30-second advertisement completely",
-                "reward": 5.0,
-                "type": "ad",
-                "requirements": {"duration": 30, "interaction": True},
-                "is_active": True,
-                "created_at": datetime.utcnow()
-            },
-            {
-                "task_id": str(uuid.uuid4()),
-                "title": "Write Product Review",
-                "description": "Write a 100-word review of a product",
-                "reward": 50.0,
-                "type": "writing",
-                "requirements": {"min_words": 100, "topic": "product_review"},
-                "is_active": True,
-                "created_at": datetime.utcnow()
-            },
-            {
-                "task_id": str(uuid.uuid4()),
-                "title": "Share on Social Media",
-                "description": "Share our platform on your social media",
-                "reward": 15.0,
-                "type": "social",
-                "requirements": {"platforms": ["facebook", "twitter", "whatsapp"]},
-                "is_active": True,
-                "created_at": datetime.utcnow()
-            }
-        ]
-        await db.tasks.insert_many(default_tasks)
-        print("Default tasks initialized")
 
 # === Main Entrypoint ===
 # if __name__ == "__main__":
