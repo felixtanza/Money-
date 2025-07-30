@@ -50,7 +50,7 @@ const AuthPage = ({ onLogin }) => {
   useEffect(() => {
     if (!isLogin) {
       const urlParams = new URLSearchParams(window.location.search);
-      const referralFromUrl = url.get('ref');
+      const referralFromUrl = urlParams.get('ref');
       if (referralFromUrl) {
         setFormData((prev) => ({
           ...prev,
@@ -369,10 +369,11 @@ const WalletCard = ({ user, onDeposit, onWithdraw }) => {
 const TaskCard = ({ task, onComplete, completed = false }) => {
   const getTaskIcon = (type) => {
     switch (type) {
-      case 'survey': return '📋';
+      case 'survey': return '�';
       case 'ad': return '📺';
       case 'writing': return '✍️';
       case 'social': return '📱';
+      case 'referral': return '🤝'; // Added icon for referral task type
       default: return '⭐';
     }
   };
@@ -674,12 +675,168 @@ const WithdrawModal = ({ isOpen, onClose, user, onWithdraw }) => {
   );
 };
 
+// New Task Completion Modal
+const TaskCompletionModal = ({ isOpen, onClose, task, onSubmitCompletion }) => {
+  const [answers, setAnswers] = useState({});
+  const [loading, setLoading] = useState(false);
+  const { showNotification } = useAppContext();
+
+  useEffect(() => {
+    if (isOpen && task && task.requirements) {
+      // Initialize answers based on task requirements
+      const initialAnswers = {};
+      try {
+        const parsedRequirements = typeof task.requirements === 'string'
+          ? JSON.parse(task.requirements)
+          : task.requirements;
+
+        if (Array.isArray(parsedRequirements)) {
+          parsedRequirements.forEach(req => {
+            if (req.field_name) {
+              initialAnswers[req.field_name] = ''; // Default empty string for text/number
+              if (req.type === 'checkbox') {
+                initialAnswers[req.field_name] = false; // Default false for checkbox
+              }
+            }
+          });
+        }
+      } catch (e) {
+        console.error("Failed to parse task requirements JSON:", e);
+        showNotification({ title: 'Error', message: 'Invalid task requirements format.', type: 'error' });
+      }
+      setAnswers(initialAnswers);
+    }
+  }, [isOpen, task, showNotification]);
+
+  const handleAnswerChange = (fieldName, value, type) => {
+    setAnswers(prev => ({
+      ...prev,
+      [fieldName]: type === 'number' ? parseFloat(value) || 0 : (type === 'checkbox' ? value : value)
+    }));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+
+    // Basic validation for required fields in the modal
+    try {
+      const parsedRequirements = typeof task.requirements === 'string'
+        ? JSON.parse(task.requirements)
+        : task.requirements;
+
+      if (Array.isArray(parsedRequirements)) {
+        for (const req of parsedRequirements) {
+          if (req.required && (answers[req.field_name] === undefined || answers[req.field_name] === '' || (req.type === 'checkbox' && answers[req.field_name] === false))) {
+            showNotification({
+              title: 'Validation Error',
+              message: `Please provide an answer for "${req.label}".`,
+              type: 'error'
+            });
+            setLoading(false);
+            return;
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Failed to parse task requirements JSON during submission validation:", e);
+      showNotification({ title: 'Error', message: 'Internal error validating task. Please try again.', type: 'error' });
+      setLoading(false);
+      return;
+    }
+
+    await onSubmitCompletion(task, answers);
+    setLoading(false);
+    onClose();
+  };
+
+  if (!isOpen || !task) return null;
+
+  let parsedRequirements = [];
+  try {
+    parsedRequirements = typeof task.requirements === 'string'
+      ? JSON.parse(task.requirements)
+      : task.requirements;
+    if (!Array.isArray(parsedRequirements)) {
+      parsedRequirements = []; // Ensure it's an array for iteration
+    }
+  } catch (e) {
+    console.error("Error parsing task requirements:", e);
+    parsedRequirements = [];
+  }
+
+  return (
+    <div className="modal-overlay">
+      <div className="modal animated-card">
+        <div className="modal-header">
+          <h3>Complete Task: {task.title}</h3>
+          <button className="modal-close" onClick={onClose}>×</button>
+        </div>
+        <form onSubmit={handleSubmit}>
+          <p className="task-modal-description">{task.description}</p>
+          {parsedRequirements.length > 0 ? (
+            <div className="task-requirements-form">
+              <h4>Questions:</h4>
+              {parsedRequirements.map((req, index) => (
+                <div className="form-group" key={index}>
+                  <label>{req.label} {req.required && <span className="required-star">*</span>}</label>
+                  {req.type === 'text' && (
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={answers[req.field_name] || ''}
+                      onChange={(e) => handleAnswerChange(req.field_name, e.target.value, req.type)}
+                      required={req.required}
+                    />
+                  )}
+                  {req.type === 'number' && (
+                    <input
+                      type="number"
+                      className="form-input"
+                      value={answers[req.field_name] || ''}
+                      onChange={(e) => handleAnswerChange(req.field_name, e.target.value, req.type)}
+                      required={req.required}
+                      min={req.min}
+                      max={req.max}
+                      step={req.step || 'any'}
+                    />
+                  )}
+                  {req.type === 'checkbox' && (
+                    <div className="checkbox-group">
+                      <input
+                        type="checkbox"
+                        id={`checkbox-${req.field_name}-${index}`}
+                        checked={!!answers[req.field_name]}
+                        onChange={(e) => handleAnswerChange(req.field_name, e.target.checked, req.type)}
+                        required={req.required}
+                      />
+                      <label htmlFor={`checkbox-${req.field_name}-${index}`}>{req.checkbox_label || 'Check to confirm'}</label>
+                    </div>
+                  )}
+                  {/* Add more input types as needed (e.g., textarea, select) */}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p>No specific questions for this task. Click "Confirm Completion" to proceed.</p>
+          )}
+          <button type="submit" className="btn-primary" disabled={loading}>
+            {loading ? 'Submitting...' : 'Confirm Completion'}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+
 // Admin Components
 const AdminDashboard = ({ user, onLogout }) => {
   const [adminPage, setAdminPage] = useState('users');
   const [users, setUsers] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [tasks, setTasks] = useState([]); // For managing all tasks
+  const [submissions, setSubmissions] = useState([]); // New state for pending submissions
   const [loading, setLoading] = useState(true);
   const { showNotification } = useAppContext();
 
@@ -689,7 +846,7 @@ const AdminDashboard = ({ user, onLogout }) => {
     description: '',
     reward: 0,
     type: 'survey',
-    requirements: {},
+    requirements: '[]', // Changed to string for JSON input
     auto_approve: true
   });
   // State for broadcast notification
@@ -737,6 +894,16 @@ const AdminDashboard = ({ user, onLogout }) => {
           showNotification({ title: 'Error', message: data.detail || 'Failed to fetch tasks', type: 'error' });
           setTasks([]);
         }
+      } else if (adminPage === 'submissions') { // New case for submissions
+        // This endpoint needs to be implemented in your backend
+        const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/admin/task-submissions/pending`, { headers });
+        data = await response.json();
+        if (response.ok && data.success && Array.isArray(data.submissions)) {
+          setSubmissions(data.submissions);
+        } else {
+          showNotification({ title: 'Error', message: data.detail || 'Failed to fetch pending submissions. Ensure backend endpoint is implemented.', type: 'error' });
+          setSubmissions([]);
+        }
       }
     } catch (error) {
       showNotification({ title: 'Error', message: 'Network error fetching admin data.', type: 'error' });
@@ -782,24 +949,30 @@ const AdminDashboard = ({ user, onLogout }) => {
     setLoading(true);
     try {
       const token = localStorage.getItem('token');
+      // Parse requirements string to JSON object
+      const taskPayload = {
+        ...newTask,
+        requirements: newTask.requirements ? JSON.parse(newTask.requirements) : {}
+      };
+
       const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/tasks`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(newTask),
+        body: JSON.stringify(taskPayload), // Send parsed requirements
       });
       const data = await response.json();
       if (response.ok) {
         showNotification({ title: 'Success', message: 'Task created successfully!', type: 'success' });
-        setNewTask({ title: '', description: '', reward: 0, type: 'survey', requirements: {}, auto_approve: true }); // Reset form
+        setNewTask({ title: '', description: '', reward: 0, type: 'survey', requirements: '[]', auto_approve: true }); // Reset form
         fetchAdminData(); // Refresh tasks list
       } else {
         showNotification({ title: 'Error', message: data.detail || 'Failed to create task', type: 'error' });
       }
     } catch (error) {
-      showNotification({ title: 'Error', message: 'Network error creating task.', type: 'error' });
+      showNotification({ title: 'Error', message: 'Network error creating task or invalid JSON in requirements.', type: 'error' });
       console.error('Error creating task:', error);
     } finally {
       setLoading(false);
@@ -834,6 +1007,48 @@ const AdminDashboard = ({ user, onLogout }) => {
     }
   };
 
+  const handleApproveSubmission = async (submissionId) => {
+    showNotification({ title: 'Info', message: 'Approve functionality is pending backend implementation.', type: 'info' });
+    // TODO: Implement backend endpoint for PUT /api/admin/task-submissions/{submission_id}/approve
+    // try {
+    //   const token = localStorage.getItem('token');
+    //   const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/admin/task-submissions/${submissionId}/approve`, {
+    //     method: 'PUT',
+    //     headers: { 'Authorization': `Bearer ${token}` }
+    //   });
+    //   const data = await response.json();
+    //   if (response.ok) {
+    //     showNotification({ title: 'Success', message: 'Submission approved!', type: 'success' });
+    //     fetchAdminData();
+    //   } else {
+    //     showNotification({ title: 'Error', message: data.detail || 'Failed to approve submission', type: 'error' });
+    //   }
+    // } catch (error) {
+    //   showNotification({ title: 'Error', message: 'Network error approving submission.', type: 'error' });
+    // }
+  };
+
+  const handleRejectSubmission = async (submissionId) => {
+    showNotification({ title: 'Info', message: 'Reject functionality is pending backend implementation.', type: 'info' });
+    // TODO: Implement backend endpoint for PUT /api/admin/task-submissions/{submission_id}/reject
+    // try {
+    //   const token = localStorage.getItem('token');
+    //   const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/admin/task-submissions/${submissionId}/reject`, {
+    //     method: 'PUT',
+    //     headers: { 'Authorization': `Bearer ${token}` }
+    //   });
+    //   const data = await response.json();
+    //   if (response.ok) {
+    //     showNotification({ title: 'Success', message: 'Submission rejected!', type: 'success' });
+    //     fetchAdminData();
+    //   } else {
+    //     showNotification({ title: 'Error', message: data.detail || 'Failed to reject submission', type: 'error' });
+    //   }
+    // } catch (error) {
+    //   showNotification({ title: 'Error', message: 'Network error rejecting submission.', type: 'error' });
+    // }
+  };
+
   return (
     <div className="dashboard admin-dashboard">
       <header className="dashboard-header">
@@ -863,6 +1078,12 @@ const AdminDashboard = ({ user, onLogout }) => {
             onClick={() => setAdminPage('transactions')}
           >
             💸 Transactions
+          </button>
+          <button
+            className={`nav-item ${adminPage === 'submissions' ? 'active' : ''}`} {/* New Submissions tab */}
+            onClick={() => setAdminPage('submissions')}
+          >
+            📝 Submissions
           </button>
           <button
             className={`nav-item ${adminPage === 'notifications' ? 'active' : ''}`}
@@ -977,6 +1198,18 @@ const AdminDashboard = ({ user, onLogout }) => {
                         <option value="referral">Referral</option>
                       </select>
                     </div>
+                    <div className="form-group">
+                      <label htmlFor="requirements-json">Requirements (JSON Array of Objects)</label>
+                      <textarea
+                        id="requirements-json"
+                        placeholder='e.g., [{"type": "text", "label": "Your Answer", "field_name": "answer_text", "required": true}]'
+                        value={newTask.requirements}
+                        onChange={(e) => setNewTask({ ...newTask, requirements: e.target.value })}
+                        className="form-input"
+                        rows="5"
+                      ></textarea>
+                      <small>Define questions/inputs for the user to complete this task. Must be valid JSON.</small>
+                    </div>
                     <div className="form-group checkbox-group">
                       <input
                         type="checkbox"
@@ -1001,6 +1234,7 @@ const AdminDashboard = ({ user, onLogout }) => {
                         <th>Type</th>
                         <th>Reward</th>
                         <th>Auto Approve</th>
+                        <th>Requirements</th>
                         <th>Created At</th>
                       </tr>
                     </thead>
@@ -1011,6 +1245,7 @@ const AdminDashboard = ({ user, onLogout }) => {
                           <td>{t.type}</td>
                           <td>{t.reward.toFixed(2)}</td>
                           <td>{t.auto_approve ? 'Yes' : 'No'}</td>
+                          <td>{t.requirements ? JSON.stringify(t.requirements).substring(0, 50) + '...' : 'N/A'}</td>
                           <td>{new Date(t.created_at).toLocaleDateString()}</td>
                         </tr>
                       ))}
@@ -1057,6 +1292,51 @@ const AdminDashboard = ({ user, onLogout }) => {
                   </table>
                 </div>
                 {transactions.length === 0 && <p className="no-data-message">No transactions found.</p>}
+              </div>
+            )}
+
+            {adminPage === 'submissions' && ( // New Submissions Section
+              <div className="admin-section animated-card">
+                <h2>Pending Task Submissions</h2>
+                <p className="info-message">
+                  This section will display tasks submitted by users that require manual approval.
+                  (Backend endpoint for fetching submissions is pending implementation.)
+                </p>
+                <div className="table-container">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Submission ID</th>
+                        <th>User ID</th>
+                        <th>Task Title</th>
+                        <th>Submitted Answers</th>
+                        <th>Submitted At</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {submissions.length > 0 ? (
+                        submissions.map(s => (
+                          <tr key={s.submission_id}>
+                            <td>{s.submission_id.substring(0, 8)}...</td>
+                            <td>{s.user_id.substring(0, 8)}...</td>
+                            <td>{s.task_title}</td>
+                            <td>{s.answers ? JSON.stringify(s.answers).substring(0, 50) + '...' : 'N/A'}</td>
+                            <td>{new Date(s.submitted_at).toLocaleDateString()}</td>
+                            <td>
+                              <button className="btn-success" onClick={() => handleApproveSubmission(s.submission_id)}>Approve</button>
+                              <button className="btn-danger" onClick={() => handleRejectSubmission(s.submission_id)}>Reject</button>
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan="6" className="no-data-message">No pending submissions found.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
 
@@ -1109,13 +1389,15 @@ const Dashboard = ({ user, onLogout }) => {
   const [loading, setLoading] = useState(true);
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
+  const [showTaskCompletionModal, setShowTaskCompletionModal] = useState(false); // New state for task completion modal
+  const [selectedTaskForCompletion, setSelectedTaskForCompletion] = useState(null); // New state for selected task
   const { theme, toggleTheme, showNotification } = useAppContext(); // Destructure showNotification
 
   useEffect(() => {
     fetchDashboardData();
     fetchTasks();
-    fetchUserNotifications(); // <--- ADDED: Fetch notifications on dashboard load
-    const notificationInterval = setInterval(fetchUserNotifications, 60000); // <--- ADDED: Poll every 60 seconds
+    fetchUserNotifications(); // Fetch notifications on dashboard load
+    const notificationInterval = setInterval(fetchUserNotifications, 60000); // Poll every 60 seconds
     return () => clearInterval(notificationInterval); // Cleanup interval on unmount
     // eslint-disable-next-line
   }, [user]); // Re-fetch when user object changes (e.g., after login)
@@ -1149,10 +1431,12 @@ const Dashboard = ({ user, onLogout }) => {
       });
       const data = await response.json();
       if (data.success) {
+        // Assuming backend /api/tasks returns only available/uncompleted tasks for the user
         setTasks(data.tasks);
       }
     } catch (error) {
       console.error('Error fetching tasks:', error);
+      showNotification({ title: 'Error', message: 'Failed to fetch tasks.', type: 'error' });
     }
   };
 
@@ -1203,7 +1487,12 @@ const Dashboard = ({ user, onLogout }) => {
     }
   };
 
-  const completeTask = async (task) => {
+  const initiateTaskCompletion = (task) => {
+    setSelectedTaskForCompletion(task);
+    setShowTaskCompletionModal(true);
+  };
+
+  const submitTaskCompletion = async (task, answers) => {
     try {
       const token = localStorage.getItem('token');
       const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/tasks/complete`, {
@@ -1214,22 +1503,22 @@ const Dashboard = ({ user, onLogout }) => {
         },
         body: JSON.stringify({
           task_id: task.task_id,
-          completion_data: { completed_at: new Date().toISOString() }
+          completion_data: answers // Send the collected answers
         }),
       });
       const data = await response.json();
       if (data.success) {
         showNotification({
-          title: 'Task Completed!',
+          title: 'Task Submitted!',
           message: data.message,
           type: 'success'
         });
         fetchDashboardData();
-        fetchTasks();
+        fetchTasks(); // Re-fetch tasks to update the list
       } else {
         showNotification({
           title: 'Error',
-          message: data.detail || 'Task completion failed',
+          message: data.detail || 'Task submission failed',
           type: 'error'
         });
       }
@@ -1379,7 +1668,7 @@ const Dashboard = ({ user, onLogout }) => {
                   <TaskCard
                     key={task.task_id || task.template_id}
                     task={task}
-                    onComplete={completeTask}
+                    onComplete={initiateTaskCompletion} // Changed to open modal
                   />
                 ))}
                 {tasks.length === 0 && (
@@ -1423,6 +1712,12 @@ const Dashboard = ({ user, onLogout }) => {
         onClose={() => setShowWithdrawModal(false)}
         user={dashboardData?.user || user}
         onWithdraw={handleWithdraw}
+      />
+      <TaskCompletionModal // New Task Completion Modal
+        isOpen={showTaskCompletionModal}
+        onClose={() => setShowTaskCompletionModal(false)}
+        task={selectedTaskForCompletion}
+        onSubmitCompletion={submitTaskCompletion}
       />
     </div>
   );
@@ -1543,3 +1838,4 @@ const App = () => {
 };
 
 export default App;
+�
