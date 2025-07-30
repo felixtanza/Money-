@@ -351,7 +351,8 @@ async def startup_db_client():
     # Ensure unique indexes for critical fields
     await db.users.create_index([("email", 1)], unique=True)
     await db.users.create_index([("phone", 1)], unique=True)
-    await db.users.create_index([("username", 1)], unique=True)
+    # MODIFIED: Added sparse=True to allow multiple documents with username: null
+    await db.users.create_index([("username", 1)], unique=True, sparse=True)
     await db.users.create_index([("user_id", 1)], unique=True)
     await db.users.create_index([("referral_code", 1)], unique=True)
     await db.users.create_index([("role", 1)]) # Index for role lookups
