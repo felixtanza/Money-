@@ -751,7 +751,7 @@ async def complete_task(
 @app.post("/api/payments/deposit", response_model=Dict[str, Any], summary="Initiate a deposit via M-Pesa STK Push")
 async def deposit_money(
     amount: float = Body(..., gt=0, description="Amount to deposit in KSH."),
-    phone: str = Body(..., regex=r"^254\d{9}$", description="M-Pesa phone number in 254XXXXXXXXX format."),
+    phone: str = Body(..., pattern=r"^254\d{9}$", description="M-Pesa phone number in 254XXXXXXXXX format."),
     current_user: User = Depends(get_current_user)
 ):
     logger.info(f"Deposit request for KSH {amount} from {phone} by user {current_user.user_id}.")
