@@ -841,7 +841,7 @@ const NotificationsPage = () => {
   const handleMarkAsRead = async (notificationId) => {
     try {
       const response = await fetch(`${BACKEND_URL}/api/notifications/${notificationId}/read`, {
-        method: 'PUT',
+        method: 'POST', // Changed to POST as per backend
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -932,13 +932,17 @@ const SettingsPage = () => {
     setMessage('');
     setIsError(false);
     try {
+      // Note: Backend's update_user_profile uses Form, so sending as FormData
+      const formData = new FormData();
+      formData.append('theme', newTheme);
+
       const response = await fetch(`${BACKEND_URL}/api/user/profile`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
+          // 'Content-Type': 'application/json', // Do NOT set Content-Type for FormData, browser sets it
         },
-        body: JSON.stringify({ theme: newTheme }),
+        body: formData, // Send as FormData
       });
       const data = await response.json();
       if (response.ok) {
@@ -1093,13 +1097,17 @@ const UserManagement = () => {
     setMessage('');
     setIsMessageError(false);
     try {
+      // Note: Backend's update_user_role uses Form, so sending as FormData
+      const formData = new FormData();
+      formData.append('new_role', newRole);
+
       const response = await fetch(`${BACKEND_URL}/api/admin/users/${userId}/role`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
+          // 'Content-Type': 'application/json', // Do NOT set Content-Type for FormData
         },
-        body: JSON.stringify({ new_role: newRole }),
+        body: formData, // Send as FormData
       });
       const data = await response.json();
       if (response.ok) {
