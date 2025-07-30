@@ -77,8 +77,36 @@ const AuthPage = ({ onLogin }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    // Registration input validation
-    if (!isLogin) {
+    // Frontend validation for both login and registration
+    if (!formData.password.trim()) { // Ensure password is not empty
+      showNotification({
+        title: 'Validation Error',
+        message: 'Password is required.',
+        type: 'error'
+      });
+      return;
+    }
+    if (!passwordPattern.test(formData.password)) {
+      showNotification({
+        title: 'Validation Error',
+        message: 'Password must be at least 6 characters.',
+        type: 'error'
+      });
+      return;
+    }
+
+    if (isLogin) {
+      // Login specific validation (username required)
+      if (!formData.username.trim()) {
+        showNotification({
+          title: 'Validation Error',
+          message: 'Username is required for login.',
+          type: 'error'
+        });
+        return;
+      }
+    } else {
+      // Registration specific validation
       if (!formData.full_name.trim()) {
         showNotification({
           title: 'Validation Error',
@@ -87,7 +115,15 @@ const AuthPage = ({ onLogin }) => {
         });
         return;
       }
-      if (!usernamePattern.test(formData.username)) { // <--- ADDED: Username validation
+      if (!formData.username.trim()) { // Username is also required for registration
+        showNotification({
+          title: 'Validation Error',
+          message: 'Username is required for registration.',
+          type: 'error'
+        });
+        return;
+      }
+      if (!usernamePattern.test(formData.username)) {
         showNotification({
           title: 'Validation Error',
           message: 'Username must be 3-20 characters, alphanumeric or underscores.',
@@ -103,34 +139,30 @@ const AuthPage = ({ onLogin }) => {
         });
         return;
       }
-    }
-    if (!emailPattern.test(formData.email)) {
-      showNotification({
-        title: 'Validation Error',
-        message: 'Please enter a valid email address.',
-        type: 'error'
-      });
-      return;
-    }
-    if (!passwordPattern.test(formData.password)) {
-      showNotification({
-        title: 'Validation Error',
-        message: 'Password must be at least 6 characters.',
-        type: 'error'
-      });
-      return;
+      if (!emailPattern.test(formData.email)) {
+        showNotification({
+          title: 'Validation Error',
+          message: 'Please enter a valid email address.',
+          type: 'error'
+        });
+        return;
+      }
     }
 
     setLoading(true);
 
     try {
       const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
+      const payload = isLogin
+        ? { username: formData.username, password: formData.password } // Only send username and password for login
+        : formData; // Send all fields for registration
+
       const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}${endpoint}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(formData),
+        body: JSON.stringify(payload), // Use the specific payload
       });
 
       const data = await response.json();
@@ -191,6 +223,22 @@ const AuthPage = ({ onLogin }) => {
         </div>
 
         <form onSubmit={handleSubmit} className="auth-form">
+          {/* Always show username field */}
+          <div className="form-group">
+            <input
+              type="text" // Changed to type="text" for username
+              placeholder="Username"
+              value={formData.username}
+              onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+              required
+              className="form-input"
+              autoComplete="username"
+              pattern="^[a-zA-Z0-9_]{3,20}$" // Apply username pattern
+              title="Username must be 3-20 characters, alphanumeric or underscores."
+            />
+          </div>
+
+          {/* Show email and other fields only for registration */}
           {!isLogin && (
             <>
               <div className="form-group">
@@ -205,16 +253,15 @@ const AuthPage = ({ onLogin }) => {
                 />
               </div>
               <div className="form-group">
-                <input // <--- ADDED: Username input field
-                  type="text"
-                  placeholder="Username"
-                  value={formData.username}
-                  onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                <input
+                  type="email" // Email field is only for registration
+                  placeholder="Email"
+                  value={formData.email}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   required
                   className="form-input"
-                  autoComplete="username"
-                  pattern="^[a-zA-Z0-9_]{3,20}$"
-                  title="Username must be 3-20 characters, alphanumeric or underscores."
+                  autoComplete="email"
+                  pattern="^[^\s@]+@[^\s@]+\.[^\s@]+$"
                 />
               </div>
               <div className="form-group">
@@ -234,7 +281,7 @@ const AuthPage = ({ onLogin }) => {
                   type="text"
                   placeholder="Referral Code (Optional)"
                   value={formData.referral_code}
-                  onChange={(e) => setFormData({ ...formData, referral_code: e.target.value })} // Changed to allow manual input if not from URL
+                  onChange={(e) => setFormData({ ...formData, referral_code: e.target.value })}
                   readOnly={referralCodeLocked}
                   disabled={referralCodeLocked}
                   className={`form-input ${referralCodeLocked ? 'locked' : ''}`}
@@ -243,19 +290,6 @@ const AuthPage = ({ onLogin }) => {
               </div>
             </>
           )}
-
-          <div className="form-group">
-            <input
-              type="email"
-              placeholder="Email"
-              value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              required
-              className="form-input"
-              autoComplete="email"
-              pattern="^[^\s@]+@[^\s@]+\.[^\s@]+$"
-            />
-          </div>
 
           <div className="form-group">
             <input
@@ -336,7 +370,7 @@ const TaskCard = ({ task, onComplete, completed = false }) => {
   const getTaskIcon = (type) => {
     switch (type) {
       case 'survey': return '📋';
-      case 'ad': return '�';
+      case 'ad': return '📺';
       case 'writing': return '✍️';
       case 'social': return '📱';
       default: return '⭐';
