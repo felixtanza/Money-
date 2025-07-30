@@ -46,7 +46,7 @@ class User(BaseModel):
     email: EmailStr = Field(...)
     hashed_password: str = Field(...)
     full_name: str = Field(...)
-    phone: str = Field(..., regex=r"^254\d{9}$") # Kenyan phone number format validation
+    phone: str = Field(..., pattern=r"^254\d{9}$") # Kenyan phone number format validation
     wallet_balance: float = Field(default=0.0)
     total_earned: float = Field(default=0.0)
     total_withdrawn: float = Field(default=0.0)
