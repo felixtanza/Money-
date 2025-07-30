@@ -3,6 +3,7 @@ from fastapi.security import OAuth2PasswordBearer
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from bson import ObjectId
+from enum import Enum
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 import os
