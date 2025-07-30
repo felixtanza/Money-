@@ -50,7 +50,7 @@ const AuthPage = ({ onLogin }) => {
   useEffect(() => {
     if (!isLogin) {
       const urlParams = new URLSearchParams(window.location.search);
-      // FIX: Changed 'url.get' to 'urlParams.get'
+      // FIX: Ensure 'urlParams.get' is used here, not 'url.get'
       const referralFromUrl = urlParams.get('ref');
       if (referralFromUrl) {
         setFormData((prev) => ({
@@ -370,7 +370,7 @@ const WalletCard = ({ user, onDeposit, onWithdraw }) => {
 const TaskCard = ({ task, onComplete, completed = false }) => {
   const getTaskIcon = (type) => {
     switch (type) {
-      case 'survey': return '�';
+      case 'survey': return '📋';
       case 'ad': return '📺';
       case 'writing': return '✍️';
       case 'social': return '📱';
@@ -1643,7 +1643,7 @@ const Dashboard = ({ user, onLogout }) => {
                 <h3>🚀 Activate Your Account</h3>
                 <p>Deposit KSH 500 to unlock all features and start earning money through tasks!</p>
                 <button className="btn-primary" onClick={() => setShowDepositModal(true)}>
-                  Activate Account
+                  Activate Now
                 </button>
               </div>
             )}
@@ -1839,4 +1839,3 @@ const App = () => {
 };
 
 export default App;
-
