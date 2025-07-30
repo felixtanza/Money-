@@ -1,9 +1,9 @@
-from fastapi import FastAPI, HTTPException, Depends, Request, Form, UploadFile, File
+from fastapi import FastAPI, HTTPException, Depends, Request, Form, UploadFile, File, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from motor.motor_asyncio import AsyncIOMotorClient
-from pydantic import BaseModel, EmailStr
-from typing import Optional, List, Dict, Any
+from pydantic import BaseModel, EmailStr, Field
+from typing import Optional, List, Dict, Any, Annotated
 import os
 import uuid
 import bcrypt
@@ -12,52 +12,64 @@ from datetime import datetime, timedelta
 import base64
 import secrets
 import asyncio
-from urllib.parse import urlparse
 import json
 import requests
 from bson import ObjectId
 from dotenv import load_dotenv
+import logging
 
-# Load environment variables from .env file
+# Set up basic logging for better visibility in production
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Load environment variables from .env file.
+# IMPORTANT: For Render deployment, these variables MUST be set in Render's environment settings.
 load_dotenv()
 
 # --- Environment Variables ---
-# IMPORTANT: These should be set in your actual environment or in a .env file
-# For production, always use environment variables, not hardcoded values.
+# These are loaded from .env locally, but will be provided by Render in production.
+# Ensure these are set securely in your Render service environment variables.
 
 MONGO_URL = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
-JWT_SECRET = os.environ.get('JWT_SECRET', 'your-secret-key-here') # CHANGE THIS IN PRODUCTION!
+JWT_SECRET = os.environ.get('JWT_SECRET', 'your-super-secret-jwt-key-please-change-this-in-production-to-a-long-random-string') # CHANGE THIS IN PRODUCTION!
+JWT_ALGORITHM = "HS256"
+JWT_ACCESS_TOKEN_EXPIRE_MINUTES = 30 # For production, consider shorter lifetimes and refresh tokens
 
 # M-Pesa STK Push Credentials
-# You get these from your Safaricom Daraja API application.
-MPESA_CONSUMER_KEY = os.environ.get('MPESA_CONSUMER_KEY', 'KR1fEeGepC63hqv5sx6ezHcfHi0uAF4WzawZf1d5RwkwEJbh') # Your actual consumer key
-MPESA_CONSUMER_SECRET = os.environ.get('MPESA_CONSUMER_SECRET', 'xBVz6KwtnqoXJ3sXOEOcE0KXp9uPe0PRV1GHXDP40vHRJPnsBQXtbmB2tlJMKquA') # Your actual consumer secret
+# Obtain these from your Safaricom Daraja API application (production credentials for live app).
+MPESA_CONSUMER_KEY = os.environ.get('MPESA_CONSUMER_KEY', 'your_mpesa_consumer_key')
+MPESA_CONSUMER_SECRET = os.environ.get('MPESA_CONSUMER_SECRET', 'your_mpesa_consumer_secret')
 MPESA_BUSINESS_SHORTCODE = os.environ.get('MPESA_BUSINESS_SHORTCODE', '174379') # Your Paybill or Till Number
 MPESA_PASSKEY = os.environ.get('MPESA_PASSKEY', 'bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919') # Your Lipa Na M-Pesa Online Passkey
 
-# This is the public URL M-Pesa will call to send you transaction results.
-# For local development, use an Ngrok HTTPS URL. For production, use your domain.
-MPESA_CALLBACK_URL = os.environ.get('MPESA_CALLBACK_URL', 'https://money-makingplatformbyequitybank.onrender.com/api/payments/stk-callback') # https://money-makingplatformbyequitybank.onrender.com*** MUST BE UPDATED IN PRODUCTION ***
+# M-Pesa API Endpoints (Production URLs)
+# For production, change these from sandbox to live API URLs.
+MPESA_AUTH_URL = "[https://api.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials](https://api.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials)" # Production Auth URL
+MPESA_STK_PUSH_URL = "[https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest](https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest)" # Production STK Push URL
+MPESA_B2C_URL = "[https://api.safaricom.co.ke/mpesa/b2c/v1/paymentrequest](https://api.safaricom.co.ke/mpesa/b2c/v1/paymentrequest)" # Production B2C URL
+
+# M-Pesa Callback URLs - These MUST be your public Render domain URLs.
+# Configure these exact URLs in your Daraja API application settings.
+MPESA_CALLBACK_URL = os.environ.get('MPESA_CALLBACK_URL', '[https://your-render-app-name.onrender.com/api/payments/stk-callback](https://your-render-app-name.onrender.com/api/payments/stk-callback)')
+MPESA_B2C_RESULT_URL = os.environ.get('MPESA_B2C_RESULT_URL', '[https://your-render-app-name.onrender.com/api/payments/b2c-callback](https://your-render-app-name.onrender.com/api/payments/b2c-callback)')
+MPESA_B2C_TIMEOUT_URL = os.environ.get('MPESA_B2C_TIMEOUT_URL', '[https://your-render-app-name.onrender.com/api/payments/b2c-timeout](https://your-render-app-name.onrender.com/api/payments/b2c-timeout)')
 
 # M-Pesa B2C (Withdrawal) Credentials
 # MPESA_INITIATOR is the username for B2C (usually your paybill number's shortcode)
 # MPESA_SECURITY_CREDENTIAL is the encrypted initiator password (generated from Daraja portal)
-MPESA_INITIATOR = os.environ.get('MPESA_INITIATOR', 'default_initiator') # From Daraja
-MPESA_SECURITY_CREDENTIAL = os.environ.get('MPESA_SECURITY_CREDENTIAL', 'default_security_credential') # From Daraja
-MPESA_B2C_URL = "https://sandbox.safaricom.co.ke/mpesa/b2c/v1/paymentrequest" # Sandbox URL
-
-# B2C Result and Timeout URLs - These also need to be public for production
-MPESA_B2C_RESULT_URL = os.environ.get('MPESA_B2C_RESULT_URL', 'https://yourdomain.com/api/payments/b2c-callback')
-MPESA_B2C_TIMEOUT_URL = os.environ.get('MPESA_B2C_TIMEOUT_URL', 'https://yourdomain.com/api/payments/b2c-timeout')
+# For production, this MUST be generated from the LIVE Daraja portal using your production certificate.
+MPESA_INITIATOR = os.environ.get('MPESA_INITIATOR', 'your_b2c_initiator_name')
+MPESA_SECURITY_CREDENTIAL = os.environ.get('MPESA_SECURITY_CREDENTIAL', 'your_encrypted_b2c_initiator_password') # This is a long, encrypted string
 
 ACTIVATION_AMOUNT = 500.0 # Constant for activation amount
+REFERRAL_REWARD_AMOUNT = 50.0 # Reward for referrer upon referred user activation
 
 app = FastAPI(title="EarnPlatform API", version="1.0.0")
 
 # --- CORS Middleware ---
+# In production, restrict allow_origins to your frontend domain(s) for security.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Consider restricting this to your frontend domain(s) in production
+    allow_origins=["*"], # Example: ["[https://your-frontend-domain.com](https://your-frontend-domain.com)", "http://localhost:3000"]
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -65,20 +77,51 @@ app.add_middleware(
 
 # --- MongoDB Connection ---
 client = AsyncIOMotorClient(MONGO_URL)
-db = client.earnplatform
+db = client.earnplatform # Access the 'earnplatform' database
 
 # --- Pydantic Models ---
+# User Models
 class UserRegister(BaseModel):
     email: EmailStr
+    username: str
     password: str
     full_name: str
-    phone: str # Consider a custom validator for E.164 format
+    phone: str # E.164 format (e.g., 2547XXXXXXXX)
     referral_code: Optional[str] = None
+    role: str = "user" # Default role for new registrations
 
 class UserLogin(BaseModel):
-    email: EmailStr
+    username: str
     password: str
 
+class UserProfile(BaseModel):
+    user_id: str = Field(alias="_id") # Map MongoDB's _id to user_id
+    email: EmailStr
+    username: str
+    full_name: str
+    phone: str
+    referral_code: str
+    referred_by: Optional[str] = None
+    wallet_balance: float
+    is_activated: bool
+    activation_amount: float
+    total_earned: float
+    total_withdrawn: float
+    referral_earnings: float
+    task_earnings: float
+    referral_count: int
+    role: str # User's role (e.g., "user", "admin")
+    created_at: datetime
+    last_login: datetime
+    notifications_enabled: bool
+    theme: str
+
+    class Config:
+        populate_by_name = True # Allow mapping _id to user_id
+        json_encoders = {datetime: lambda dt: dt.isoformat()}
+        arbitrary_types_allowed = True # Needed for ObjectId if not converted immediately
+
+# Transaction Models
 class DepositRequest(BaseModel):
     amount: float
     phone: str # Expected in E.164 format (e.g., 2547XXXXXXXX)
@@ -88,17 +131,20 @@ class WithdrawalRequest(BaseModel):
     phone: str # Expected in E.164 format (e.g., 2547XXXXXXXX)
     reason: Optional[str] = "Withdrawal request"
 
-class Task(BaseModel):
+# Task Models
+class TaskCreate(BaseModel):
     title: str
     description: str
     reward: float
     type: str  # survey, ad, writing, referral, social
     requirements: Dict[str, Any]
+    auto_approve: bool = True # New field: if True, reward is instant
 
 class TaskCompletion(BaseModel):
     task_id: str
     completion_data: Dict[str, Any]
 
+# Notification Model
 class NotificationCreate(BaseModel):
     title: str
     message: str
@@ -111,25 +157,26 @@ def hash_password(password: str) -> str:
 def verify_password(password: str, hashed: str) -> bool:
     return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
 
-def create_jwt_token(user_id: str, email: str) -> str:
+def create_jwt_token(user_id: str, email: str, role: str) -> str:
     payload = {
         'user_id': user_id,
         'email': email,
-        'exp': datetime.utcnow() + timedelta(days=30) # Token valid for 30 days
+        'role': role, # Include role in JWT payload
+        'exp': datetime.utcnow() + timedelta(minutes=JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
     }
-    return jwt.encode(payload, JWT_SECRET, algorithm='HS256')
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 def verify_jwt_token(token: str) -> dict:
     try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=['HS256'])
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         return payload
     except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expired")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")
     except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
 def generate_referral_code() -> str:
-    return secrets.token_urlsafe(8).upper() # Generates a URL-safe random string
+    return secrets.token_urlsafe(8).upper()
 
 def fix_mongo_ids(doc):
     """Recursively converts ObjectId to string in MongoDB dictionaries/lists for JSON serialization."""
@@ -142,9 +189,7 @@ def fix_mongo_ids(doc):
     else:
         return doc
 
-# --- M-Pesa STK Push and B2C Helper Functions ---
-
-# Global cache for M-Pesa access token. In a larger application, consider Redis or similar.
+# --- M-Pesa Access Token Cache ---
 _mpesa_access_token_cache = {"token": None, "expiry": None}
 
 async def get_mpesa_access_token() -> Optional[str]:
@@ -154,91 +199,197 @@ async def get_mpesa_access_token() -> Optional[str]:
     """
     current_time = datetime.utcnow()
 
-    # Check if token exists and is still valid (e.g., refresh 5 minutes before actual expiry)
     if _mpesa_access_token_cache["token"] and _mpesa_access_token_cache["expiry"] and \
        _mpesa_access_token_cache["expiry"] > current_time + timedelta(minutes=5):
         return _mpesa_access_token_cache["token"]
 
-    # If no token or expired, fetch a new one
-    auth_url = "https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials"
     try:
         response = requests.get(
-            auth_url,
+            MPESA_AUTH_URL, # Use production auth URL
             auth=(MPESA_CONSUMER_KEY, MPESA_CONSUMER_SECRET),
-            timeout=10 # Set a timeout for the request
+            timeout=10
         )
-        response.raise_for_status() # Raises HTTPError for 4xx/5xx responses
+        response.raise_for_status()
         token_data = response.json()
         token = token_data.get("access_token")
 
-        # --- CORRECTED AREA: Ensure expires_in is an integer ---
         expires_in_raw = token_data.get("expires_in", 3599)
         try:
             expires_in = int(expires_in_raw)
         except (ValueError, TypeError):
-            print(f"Warning: 'expires_in' from M-Pesa was not an integer: {expires_in_raw}. Defaulting to 3599 seconds.")
-            expires_in = 3599 # Fallback if conversion fails
-        # --- END CORRECTED AREA ---
+            logging.warning(f"Warning: 'expires_in' from M-Pesa was not an integer: {expires_in_raw}. Defaulting to 3599 seconds.")
+            expires_in = 3599
 
         if token:
             _mpesa_access_token_cache["token"] = token
             _mpesa_access_token_cache["expiry"] = current_time + timedelta(seconds=expires_in)
-            print(f"M-Pesa access token refreshed. Expires at: {_mpesa_access_token_cache['expiry']}")
+            logging.info(f"M-Pesa access token refreshed. Expires at: {_mpesa_access_token_cache['expiry']}")
             return token
         else:
-            print(f"M-Pesa token response did not contain 'access_token': {token_data}")
+            logging.error(f"M-Pesa token response did not contain 'access_token': {token_data}")
             return None
     except requests.exceptions.RequestException as e:
-        print(f"Error getting M-Pesa access token: {e}")
+        logging.error(f"Error getting M-Pesa access token: {e}")
         return None
 
 def generate_stk_password(timestamp: str) -> str:
     """Generates the M-Pesa STK Push password required for the API call."""
-    # The formula is: BusinessShortCode + Passkey + Timestamp
     data_to_encode = f"{MPESA_BUSINESS_SHORTCODE}{MPESA_PASSKEY}{timestamp}"
     encoded_password = base64.b64encode(data_to_encode.encode("utf-8")).decode("utf-8")
     return encoded_password
 
-def generate_b2c_security_credential(initiator_password: str) -> str:
-    """
-    Generates the SecurityCredential for B2C.
-    This is usually done via Daraja portal to get an encrypted password.
-    In a real scenario, you'd integrate with Safaricom's public key for encryption.
-    For sandbox, MPESA_SECURITY_CREDENTIAL from .env is typically the base64 encoded,
-    encrypted password you generate on Daraja portal.
-    """
-    # For Sandbox, you get this pre-generated from Daraja portal (Encrypt Initiator Password utility)
-    # For production, you'd use a certificate for encryption.
-    # The MPESA_SECURITY_CREDENTIAL environment variable should hold this pre-generated value.
+def generate_b2c_security_credential() -> str:
+    """Returns the pre-generated B2C SecurityCredential."""
+    # For production, this value is generated from Daraja portal's "Encrypt Initiator Password" utility
+    # using your production certificate. It's stored as an environment variable.
     return MPESA_SECURITY_CREDENTIAL
-
 
 # --- Dependency to Get Current User ---
 async def get_current_user(request: Request):
     token = request.headers.get('Authorization')
     if not token:
-        raise HTTPException(status_code=401, detail="No token provided")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No token provided")
     if token.startswith('Bearer '):
         token = token[7:]
+    
     payload = verify_jwt_token(token)
-    user = await db.users.find_one({"user_id": payload['user_id']})
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-    return user
+    user_id = payload.get('user_id')
+    user_email = payload.get('email')
+    user_role = payload.get('role', 'user') # Default to 'user' if role is missing in token
+
+    if user_id is None or user_email is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
+
+    # Fetch user from DB to get the most up-to-date user data, including current role
+    user_doc = await db.users.find_one({"user_id": user_id})
+    if not user_doc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    
+    # Ensure the role from the token matches the role in the database for security
+    # If roles can change, you might want to force re-login or re-issue token on role change.
+    # For now, we'll use the role from the DB as the source of truth.
+    user_doc['role'] = user_doc.get('role', 'user') # Ensure role exists in DB doc
+
+    return user_doc
+
+# --- Role-Based Access Control (RBAC) Dependency ---
+class RoleChecker:
+    def __init__(self, allowed_roles: List[str]):
+        self.allowed_roles = allowed_roles
+
+    async def __call__(self, current_user: Annotated[Dict[str, Any], Depends(get_current_user)]):
+        if current_user.get('role') not in self.allowed_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not enough permissions to access this resource."
+            )
+        return True # User has the required role
+
+# --- Internal Helper Functions (for notifications and referrals) ---
+async def create_notification(notification_data: Dict[str, Any]):
+    """Creates a notification in the database."""
+    notification_doc = {
+        "notification_id": str(uuid.uuid4()),
+        "title": notification_data.get("title", "Notification"),
+        "message": notification_data.get("message", ""),
+        "user_id": notification_data.get("user_id"),
+        "is_read": False,
+        "created_at": datetime.utcnow()
+    }
+    await db.notifications.insert_one(notification_doc)
+    logging.info(f"Notification created for user {notification_data.get('user_id')}: {notification_data.get('title')}")
+
+async def process_referral_reward(referred_user_id: str, referrer_user_id: str):
+    """
+    Processes the referral reward when a referred user activates their account.
+    """
+    referral_record = await db.referrals.find_one({
+        "referred_id": referred_user_id,
+        "referrer_id": referrer_user_id,
+        "status": "pending"
+    })
+
+    if referral_record:
+        reward_amount = referral_record.get('reward_amount', REFERRAL_REWARD_AMOUNT)
+        referrer = await db.users.find_one({"user_id": referrer_user_id})
+
+        if referrer:
+            # Update referrer's wallet balance and referral earnings
+            await db.users.update_one(
+                {"user_id": referrer_user_id},
+                {"$inc": {
+                    "wallet_balance": reward_amount,
+                    "referral_earnings": reward_amount,
+                    "referral_count": 1
+                }}
+            )
+            # Update referral record status
+            await db.referrals.update_one(
+                {"_id": referral_record['_id']},
+                {"$set": {
+                    "status": "completed",
+                    "activation_date": datetime.utcnow()
+                }}
+            )
+
+            # Create notification for the referrer
+            await create_notification({
+                "title": "Referral Reward Earned!",
+                "message": f"Great news! Your referred user has activated their account. You've earned KSH {reward_amount:.2f}.",
+                "user_id": referrer_user_id
+            })
+            logging.info(f"Referral reward of KSH {reward_amount} processed for referrer {referrer_user_id}.")
+        else:
+            logging.error(f"Referrer user {referrer_user_id} not found for referral entry {referral_record['_id']}")
+    else:
+        logging.info(f"No pending referral record found for referred user {referred_user_id} by referrer {referrer_user_id}.")
+
+
+# --- Database Startup Event (for indexing) ---
+@app.on_event("startup")
+async def startup_db_client():
+    # Ensure unique indexes for critical fields
+    await db.users.create_index([("email", 1)], unique=True)
+    await db.users.create_index([("phone", 1)], unique=True)
+    await db.users.create_index([("username", 1)], unique=True)
+    await db.users.create_index([("user_id", 1)], unique=True)
+    await db.users.create_index([("referral_code", 1)], unique=True)
+    await db.users.create_index([("role", 1)]) # Index for role lookups
+
+    # Indexes for transactions
+    await db.transactions.create_index([("transaction_id", 1)], unique=True)
+    await db.transactions.create_index([("user_id", 1)])
+    await db.transactions.create_index([("CheckoutRequestID", 1)], unique=True, sparse=True) # For STK Push
+    await db.transactions.create_index([("b2c_originator_id", 1)], unique=True, sparse=True) # For B2C
+    await db.transactions.create_index([("created_at", -1)])
+
+    # Indexes for referrals
+    await db.referrals.create_index([("referred_id", 1)], unique=True)
+    await db.referrals.create_index([("referrer_id", 1)])
+    await db.referrals.create_index([("status", 1)])
+
+    # Indexes for notifications
+    await db.notifications.create_index([("user_id", 1)])
+    await db.notifications.create_index([("created_at", -1)])
+
+    logging.info("MongoDB indexes ensured.")
 
 # --- Auth Routes ---
-@app.post("/api/auth/register")
+@app.post("/api/auth/register", summary="Register a new user")
 async def register(user_data: UserRegister):
-    existing_user = await db.users.find_one({"email": user_data.email})
-    if existing_user:
-        raise HTTPException(status_code=400, detail="Email already registered")
-    existing_phone = await db.users.find_one({"phone": user_data.phone})
-    if existing_phone:
-        raise HTTPException(status_code=400, detail="Phone number already registered")
+    existing_user_email = await db.users.find_one({"email": user_data.email})
+    if existing_user_email:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
+    existing_user_phone = await db.users.find_one({"phone": user_data.phone})
+    if existing_user_phone:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Phone number already registered")
+    existing_user_username = await db.users.find_one({"username": user_data.username})
+    if existing_user_username:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username already taken")
 
     # Basic phone format validation (2547XXXXXXXX)
     if not user_data.phone.startswith("254") or not user_data.phone[3:].isdigit() or len(user_data.phone) != 12:
-        raise HTTPException(status_code=400, detail="Invalid phone number format. Use E.164 (e.g., 2547XXXXXXXX).")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid phone number format. Use E.164 (e.g., 2547XXXXXXXX).")
 
     user_id = str(uuid.uuid4())
     referral_code = generate_referral_code()
@@ -247,10 +398,13 @@ async def register(user_data: UserRegister):
         referrer = await db.users.find_one({"referral_code": user_data.referral_code})
         if referrer:
             referred_by = referrer['user_id']
+        else:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid referral code.")
 
     user_doc = {
         "user_id": user_id,
         "email": user_data.email,
+        "username": user_data.username,
         "password": hash_password(user_data.password),
         "full_name": user_data.full_name,
         "phone": user_data.phone,
@@ -264,6 +418,7 @@ async def register(user_data: UserRegister):
         "referral_earnings": 0.0,
         "task_earnings": 0.0,
         "referral_count": 0,
+        "role": user_data.role, # Role from Pydantic model (defaults to "user")
         "created_at": datetime.utcnow(),
         "last_login": datetime.utcnow(),
         "notifications_enabled": True,
@@ -279,63 +434,64 @@ async def register(user_data: UserRegister):
             "status": "pending",
             "created_at": datetime.utcnow(),
             "activation_date": None,
-            "reward_amount": 50.0 # Reward for referrer upon activation
+            "reward_amount": REFERRAL_REWARD_AMOUNT
         })
 
-    token = create_jwt_token(user_id, user_data.email)
+    token = create_jwt_token(user_id, user_data.email, user_data.role)
     return {
         "success": True,
         "message": f"Registration successful! Please deposit KSH {ACTIVATION_AMOUNT} to activate your account.",
         "token": token,
-        "user": {
+        "user": fix_mongo_ids({
             "user_id": user_id,
             "email": user_data.email,
+            "username": user_data.username,
             "full_name": user_data.full_name,
             "referral_code": referral_code,
             "is_activated": False,
-            "wallet_balance": 0.0
-        }
+            "wallet_balance": 0.0,
+            "role": user_data.role
+        })
     }
 
-@app.post("/api/auth/login")
+@app.post("/api/auth/login", summary="Login user")
 async def login(user_data: UserLogin):
-    user = await db.users.find_one({"email": user_data.email})
+    user = await db.users.find_one({"username": user_data.username})
     if not user or not verify_password(user_data.password, user['password']):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password")
 
     await db.users.update_one(
         {"user_id": user['user_id']},
         {"$set": {"last_login": datetime.utcnow()}}
     )
 
-    token = create_jwt_token(user['user_id'], user['email'])
+    token = create_jwt_token(user['user_id'], user['email'], user.get('role', 'user'))
     return {
         "success": True,
         "message": "Login successful!",
         "token": token,
-        "user": {
+        "user": fix_mongo_ids({
             "user_id": user['user_id'],
             "email": user['email'],
+            "username": user['username'],
             "full_name": user['full_name'],
             "referral_code": user['referral_code'],
             "is_activated": user['is_activated'],
             "wallet_balance": user['wallet_balance'],
-            "theme": user.get('theme', 'light') # Default theme to 'light'
-        }
+            "role": user.get('role', 'user'),
+            "theme": user.get('theme', 'light')
+        })
     }
 
 # --- Dashboard & User Data ---
-
-@app.get("/api/dashboard/stats")
-async def get_dashboard_stats(current_user: dict = Depends(get_current_user)):
+@app.get("/api/dashboard/stats", response_model=Dict[str, Any], summary="Get user dashboard stats")
+async def get_dashboard_stats(current_user: Annotated[Dict[str, Any], Depends(get_current_user)]):
     user_id = current_user['user_id']
 
-    # Fetch recent transactions
     transactions = await db.transactions.find(
         {"user_id": user_id}
     ).sort("created_at", -1).limit(10).to_list(10)
 
-    # Aggregate referral statistics
     referral_stats = await db.referrals.aggregate([
         {"$match": {"referrer_id": user_id}},
         {"$group": {
@@ -345,10 +501,8 @@ async def get_dashboard_stats(current_user: dict = Depends(get_current_user)):
         }}
     ]).to_list(10)
 
-    # Count task completions
     task_completions = await db.task_completions.count_documents({"user_id": user_id})
 
-    # Fetch recent notifications (user-specific or broadcast)
     notifications = await db.notifications.find(
         {"$or": [{"user_id": user_id}, {"user_id": None}]}
     ).sort("created_at", -1).limit(5).to_list(5)
@@ -365,7 +519,8 @@ async def get_dashboard_stats(current_user: dict = Depends(get_current_user)):
             "referral_earnings": current_user.get('referral_earnings', 0.0),
             "task_earnings": current_user.get('task_earnings', 0.0),
             "referral_count": current_user.get('referral_count', 0),
-            "referral_code": current_user['referral_code']
+            "referral_code": current_user['referral_code'],
+            "role": current_user.get('role', 'user')
         }),
         "recent_transactions": fix_mongo_ids(transactions),
         "referral_stats": fix_mongo_ids(referral_stats),
@@ -374,76 +529,71 @@ async def get_dashboard_stats(current_user: dict = Depends(get_current_user)):
     }
 
 # --- Payment Routes (STK Push for Deposits, B2C for Withdrawals) ---
-
-@app.post("/api/payments/deposit")
-async def initiate_deposit(deposit_data: DepositRequest, current_user: dict = Depends(get_current_user)):
-    """
-    Initiates an M-Pesa STK Push transaction for deposits.
-    """
-    # Validate phone number format (E.164: 2547XXXXXXXX)
+@app.post("/api/payments/deposit", summary="Initiate M-Pesa STK Push for deposit")
+async def initiate_deposit(
+    deposit_data: DepositRequest,
+    current_user: Annotated[Dict[str, Any], Depends(get_current_user)],
+    # Only 'user' and 'admin' roles can initiate deposits
+    has_permission: Annotated[bool, Depends(RoleChecker(["user", "admin"]))]
+):
     if not deposit_data.phone.startswith("254") or len(deposit_data.phone) != 12 or not deposit_data.phone[3:].isdigit():
-        raise HTTPException(status_code=400, detail="Invalid phone number format. Must be 254xxxxxxxxxx (E.164).")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid phone number format. Must be 254xxxxxxxxxx (E.164).")
 
     if deposit_data.amount <= 0:
-        raise HTTPException(status_code=400, detail="Deposit amount must be greater than zero.")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Deposit amount must be greater than zero.")
+
+    # For security, ensure the phone number for deposit matches the user's registered phone
+    if deposit_data.phone != current_user['phone']:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Deposit can only be initiated for your registered phone number.")
 
     transaction_id = str(uuid.uuid4())
 
-    # Store the transaction as pending initially, with fields to be updated by M-Pesa callback
     transaction_doc = {
         "transaction_id": transaction_id,
         "user_id": current_user['user_id'],
         "type": "deposit",
         "amount": deposit_data.amount,
         "phone": deposit_data.phone,
-        "status": "pending_mpesa_stk", # New status to indicate STK Push is initiated
+        "status": "pending_mpesa_stk",
         "method": "mpesa_stk_push",
         "created_at": datetime.utcnow(),
         "completed_at": None,
         "mpesa_receipt": None,
-        "MerchantRequestID": None, # Will be filled by M-Pesa's initial response
-        "CheckoutRequestID": None    # Will be filled by M-Pesa's initial response
+        "MerchantRequestID": None,
+        "CheckoutRequestID": None
     }
     await db.transactions.insert_one(transaction_doc)
 
     access_token = await get_mpesa_access_token()
     if not access_token:
-        # If token acquisition fails, mark transaction as failed and return error
         await db.transactions.update_one(
             {"transaction_id": transaction_id},
             {"$set": {"status": "failed", "completed_at": datetime.utcnow(), "mpesa_response_error": "Failed to get M-Pesa access token"}}
         )
-        raise HTTPException(status_code=500, detail="Failed to connect to M-Pesa. Please try again later.")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to connect to M-Pesa. Please try again later.")
 
     timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
     password = generate_stk_password(timestamp)
-
-    stk_push_url = "https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest"
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json"
-    }
 
     payload = {
         "BusinessShortCode": MPESA_BUSINESS_SHORTCODE,
         "Password": password,
         "Timestamp": timestamp,
-        "TransactionType": "CustomerPayBillOnline", # Or "CustomerBuyGoodsOnline" if applicable
-        "Amount": int(deposit_data.amount), # Amount must be an integer for M-Pesa STK Push
-        "PartyA": deposit_data.phone, # Customer's phone number
-        "PartyB": MPESA_BUSINESS_SHORTCODE, # Your Paybill/Till Number
-        "PhoneNumber": deposit_data.phone, # Customer's phone number
-        "CallBackURL": MPESA_CALLBACK_URL, # The URL M-Pesa sends the transaction result to
-        "AccountReference": transaction_id, # Your internal unique identifier for the transaction
+        "TransactionType": "CustomerPayBillOnline",
+        "Amount": int(deposit_data.amount),
+        "PartyA": deposit_data.phone,
+        "PartyB": MPESA_BUSINESS_SHORTCODE,
+        "PhoneNumber": deposit_data.phone,
+        "CallBackURL": MPESA_CALLBACK_URL,
+        "AccountReference": transaction_id,
         "TransactionDesc": f"Deposit to EarnPlatform for User {current_user['user_id']}"
     }
 
     try:
-        response = requests.post(stk_push_url, headers=headers, json=payload, timeout=30)
-        response.raise_for_status() # Raises HTTPError for bad responses (4xx or 5xx)
+        response = requests.post(MPESA_STK_PUSH_URL, headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}, json=payload, timeout=30)
+        response.raise_for_status()
         stk_response = response.json()
 
-        # Update the transaction with M-Pesa's immediate response IDs
         await db.transactions.update_one(
             {"transaction_id": transaction_id},
             {"$set": {
@@ -455,7 +605,7 @@ async def initiate_deposit(deposit_data: DepositRequest, current_user: dict = De
             }}
         )
 
-        if stk_response.get("ResponseCode") == "0": # STK Push initiated successfully
+        if stk_response.get("ResponseCode") == "0":
             return {
                 "success": True,
                 "message": "STK Push initiated successfully. Please check your phone for the M-Pesa prompt.",
@@ -463,57 +613,50 @@ async def initiate_deposit(deposit_data: DepositRequest, current_user: dict = De
                 "MerchantRequestID": stk_response.get("MerchantRequestID"),
                 "CheckoutRequestID": stk_response.get("CheckoutRequestID")
             }
-        else: # STK Push initiation failed (e.g., invalid phone number, insufficient funds)
+        else:
             await db.transactions.update_one(
                 {"transaction_id": transaction_id},
                 {"$set": {"status": "failed_stk_init", "completed_at": datetime.utcnow()}}
             )
-            raise HTTPException(status_code=400, detail=stk_response.get("ResponseDescription", "STK Push initiation failed. Please try again."))
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=stk_response.get("ResponseDescription", "STK Push initiation failed. Please try again."))
 
     except requests.exceptions.RequestException as e:
-        print(f"STK Push API call error: {e}")
-        # Mark transaction as failed if the API call itself fails
+        logging.error(f"STK Push API call error: {e}")
         await db.transactions.update_one(
             {"transaction_id": transaction_id},
             {"$set": {"status": "failed", "completed_at": datetime.utcnow(), "mpesa_response_error": str(e)}}
         )
-        raise HTTPException(status_code=500, detail=f"Failed to communicate with M-Pesa. Please check your network or try again later. Error: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to communicate with M-Pesa. Error: {e}")
 
-@app.post("/api/payments/stk-callback")
+@app.post("/api/payments/stk-callback", summary="M-Pesa STK Push Callback Endpoint (Internal)")
 async def mpesa_stk_callback(request: Request):
-    """
-    Handles the asynchronous M-Pesa STK Push callback from Safaricom.
-    This endpoint receives the final status of the STK Push transaction.
-    """
     callback_data = await request.json()
-    print(f"M-Pesa STK Callback Received: {json.dumps(callback_data, indent=2)}")
+    logging.info(f"M-Pesa STK Callback Received: {json.dumps(callback_data, indent=2)}")
 
     try:
         stk_callback_body = callback_data['Body']['stkCallback']
         result_code = stk_callback_body['ResultCode']
         checkout_request_id = stk_callback_body['CheckoutRequestID']
-        merchant_request_id = stk_callback_body['MerchantRequestID']
 
-        # Find the pending transaction using CheckoutRequestID
         transaction = await db.transactions.find_one({
             "CheckoutRequestID": checkout_request_id,
             "status": "pending_mpesa_stk"
         })
 
         if not transaction:
-            print(f"Warning: Transaction not found for CheckoutRequestID: {checkout_request_id}. Maybe already processed or invalid.")
-            # Still return 200 OK to M-Pesa even if we can't find our transaction
+            logging.warning(f"STK Callback: Transaction not found for CheckoutRequestID: {checkout_request_id}. Maybe already processed or invalid.")
             return JSONResponse({"ResultCode": 0, "ResultDesc": "C2B Request Processed"}, status_code=200)
 
         user = await db.users.find_one({"user_id": transaction['user_id']})
         if not user:
-            print(f"Error: User not found for transaction {transaction['transaction_id']}. Cannot update balance/status.")
+            logging.error(f"STK Callback: User not found for transaction {transaction['transaction_id']}. Cannot update balance/status.")
             return JSONResponse({"ResultCode": 0, "ResultDesc": "C2B Request Processed"}, status_code=200)
 
         update_fields = {
             "completed_at": datetime.utcnow(),
             "mpesa_result_code": result_code,
-            "mpesa_result_description": stk_callback_body.get('ResultDesc')
+            "mpesa_result_description": stk_callback_body.get('ResultDesc'),
+            "mpesa_raw_callback": callback_data # Store raw callback for auditing
         }
 
         if result_code == 0: # Payment was successful
@@ -526,15 +669,13 @@ async def mpesa_stk_callback(request: Request):
             update_fields.update({
                 "status": "completed",
                 "mpesa_receipt": mpesa_receipt_number,
-                "amount_received": float(transaction_amount), # Ensure it's a float
+                "amount_received": float(transaction_amount),
                 "phone_number_paid": phone_number_paid
             })
 
-            # Update user's wallet balance
             new_balance = user['wallet_balance'] + float(transaction_amount)
             user_update_data = {"wallet_balance": new_balance}
 
-            # Check for account activation if the deposit meets the activation amount
             if not user['is_activated'] and float(transaction_amount) >= user.get('activation_amount', ACTIVATION_AMOUNT):
                 user_update_data['is_activated'] = True
                 if user.get('referred_by'):
@@ -542,91 +683,57 @@ async def mpesa_stk_callback(request: Request):
 
             await db.users.update_one({"user_id": user['user_id']}, {"$set": user_update_data})
 
-            # Create notification for the user
             await create_notification({
                 "title": "Deposit Successful!",
                 "message": f"Your deposit of KSH {float(transaction_amount):.2f} has been processed successfully. Your new balance is KSH {new_balance:.2f}.",
                 "user_id": user['user_id']
             })
-            print(f"STK Push Success: CheckoutRequestID={checkout_request_id}, Receipt={mpesa_receipt_number}, Amount={transaction_amount}")
+            logging.info(f"STK Push Success: CheckoutRequestID={checkout_request_id}, Receipt={mpesa_receipt_number}, Amount={transaction_amount}")
 
         else: # Payment failed or was cancelled by user
             update_fields["status"] = "failed"
-            print(f"STK Push Failed: CheckoutRequestID={checkout_request_id}, ResultCode={result_code}, ResultDesc={stk_callback_body.get('ResultDesc')}")
+            logging.warning(f"STK Push Failed: CheckoutRequestID={checkout_request_id}, ResultCode={result_code}, ResultDesc={stk_callback_body.get('ResultDesc')}")
 
-            # Create notification for the user about the failure
             await create_notification({
                 "title": "Deposit Failed",
                 "message": f"Your deposit of KSH {transaction['amount']} failed. Reason: {stk_callback_body.get('ResultDesc', 'Unknown error')}",
                 "user_id": user['user_id']
             })
 
-        # Finally, update the transaction document in the database
         await db.transactions.update_one(
-            {"_id": transaction['_id']}, # Use _id for direct update for atomicity
+            {"_id": transaction['_id']},
             {"$set": update_fields}
         )
 
     except KeyError as e:
-        print(f"Error parsing M-Pesa STK callback data: Missing key {e}. Full data: {json.dumps(callback_data, indent=2)}")
+        logging.error(f"Error parsing M-Pesa STK callback data: Missing key {e}. Full data: {json.dumps(callback_data, indent=2)}")
     except Exception as e:
-        print(f"An unexpected error occurred processing STK callback: {e}. Full data: {json.dumps(callback_data, indent=2)}")
+        logging.error(f"An unexpected error occurred processing STK callback: {e}. Full data: {json.dumps(callback_data, indent=2)}")
 
-    # Always return a 200 OK JSON response to M-Pesa to acknowledge receipt of the callback.
-    # This prevents M-Pesa from retrying the callback.
     return JSONResponse({"ResultCode": 0, "ResultDesc": "C2B Request Processed"}, status_code=200)
 
-
-async def send_mpesa_b2c(phone: str, amount: float, transaction_id: str, access_token: str, remarks: str = "Withdrawal"):
-    """
-    Sends a B2C (Business to Customer) payment request via M-Pesa.
-    Requires an access_token.
-    """
-    if not access_token:
-        print("Error: B2C access token is missing.")
-        return {"error": "B2C access token is missing."}
-
-    payload = {
-        "InitiatorName": MPESA_INITIATOR,
-        "SecurityCredential": generate_b2c_security_credential(MPESA_SECURITY_CREDENTIAL), # Uses the pre-generated credential
-        "CommandID": "BusinessPayment", # Or "SalaryPayment", "PromotionPayment"
-        "Amount": amount,
-        "PartyA": MPESA_BUSINESS_SHORTCODE, # Your Paybill/Till number
-        "PartyB": phone, # Customer's phone number
-        "Remarks": remarks,
-        "QueueTimeOutURL": MPESA_B2C_TIMEOUT_URL, # Callback for timeout
-        "ResultURL": MPESA_B2C_RESULT_URL, # Callback for final result
-        "Occassion": transaction_id # Your internal transaction ID
-    }
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json"
-    }
-    try:
-        response = requests.post(MPESA_B2C_URL, json=payload, headers=headers, timeout=30)
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        print(f"B2C API error during request: {e}")
-        return {"error": str(e)}
-
-@app.post("/api/payments/withdraw")
-async def request_withdrawal(withdrawal_data: WithdrawalRequest, current_user: dict = Depends(get_current_user)):
-    """
-    Handles a user's withdrawal request, initiating an M-Pesa B2C transaction.
-    """
+@app.post("/api/payments/withdraw", summary="Initiate M-Pesa B2C Withdrawal")
+async def request_withdrawal(
+    withdrawal_data: WithdrawalRequest,
+    current_user: Annotated[Dict[str, Any], Depends(get_current_user)],
+    # Only 'user' and 'admin' roles can initiate withdrawals
+    has_permission: Annotated[bool, Depends(RoleChecker(["user", "admin"]))]
+):
     if not current_user['is_activated']:
-        raise HTTPException(status_code=400, detail="Account must be activated before withdrawal.")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Account must be activated before withdrawal.")
 
     if withdrawal_data.amount > current_user['wallet_balance']:
-        raise HTTPException(status_code=400, detail="Insufficient balance for withdrawal.")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Insufficient balance for withdrawal.")
 
-    if withdrawal_data.amount < 100: # Minimum withdrawal amount
-        raise HTTPException(status_code=400, detail="Minimum withdrawal amount is KSH 100.")
+    if withdrawal_data.amount < 100:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Minimum withdrawal amount is KSH 100.")
 
-    # Validate phone number format (E.164: 2547XXXXXXXX)
     if not withdrawal_data.phone.startswith("254") or len(withdrawal_data.phone) != 12 or not withdrawal_data.phone[3:].isdigit():
-        raise HTTPException(status_code=400, detail="Invalid phone number format. Must be 254xxxxxxxxxx (E.164).")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid phone number format. Must be 254xxxxxxxxxx (E.164).")
+
+    # For security, ensure the phone number for withdrawal matches the user's registered phone
+    if withdrawal_data.phone != current_user['phone']:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Withdrawal can only be initiated to your registered phone number.")
 
     transaction_id = str(uuid.uuid4())
     withdrawal_doc = {
@@ -636,11 +743,10 @@ async def request_withdrawal(withdrawal_data: WithdrawalRequest, current_user: d
         "amount": withdrawal_data.amount,
         "phone": withdrawal_data.phone,
         "reason": withdrawal_data.reason,
-        "status": "pending_b2c_init", # Initial status for B2C withdrawal
+        "status": "pending_b2c_init",
         "method": "mpesa_b2c",
         "created_at": datetime.utcnow(),
         "processed_at": None,
-        "approved_by": None,
         "b2c_conversation_id": None,
         "b2c_originator_id": None
     }
@@ -655,7 +761,6 @@ async def request_withdrawal(withdrawal_data: WithdrawalRequest, current_user: d
 
     b2c_access_token = await get_mpesa_access_token()
     if not b2c_access_token:
-        # If token acquisition fails, refund user and mark transaction failed
         await db.users.update_one(
             {"user_id": current_user['user_id']},
             {"$inc": {"wallet_balance": withdrawal_data.amount}}
@@ -664,448 +769,419 @@ async def request_withdrawal(withdrawal_data: WithdrawalRequest, current_user: d
             {"transaction_id": transaction_id},
             {"$set": {"status": "failed", "processed_at": datetime.utcnow(), "error_message": "Failed to get B2C access token."}}
         )
-        raise HTTPException(status_code=500, detail="Failed to process withdrawal: M-Pesa access token unavailable.")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to process withdrawal: M-Pesa access token unavailable.")
 
-    # Send the B2C request to M-Pesa
-    b2c_response = await send_mpesa_b2c(withdrawal_data.phone, withdrawal_data.amount, transaction_id, b2c_access_token, withdrawal_data.reason)
+    b2c_response = requests.post(
+        MPESA_B2C_URL, # Use production B2C URL
+        json={
+            "InitiatorName": MPESA_INITIATOR,
+            "SecurityCredential": generate_b2c_security_credential(),
+            "CommandID": "BusinessPayment",
+            "Amount": withdrawal_data.amount,
+            "PartyA": MPESA_BUSINESS_SHORTCODE,
+            "PartyB": withdrawal_data.phone,
+            "Remarks": withdrawal_data.reason,
+            "QueueTimeOutURL": MPESA_B2C_TIMEOUT_URL,
+            "ResultURL": MPESA_B2C_RESULT_URL,
+            "Occasion": transaction_id
+        },
+        headers={"Authorization": f"Bearer {b2c_access_token}", "Content-Type": "application/json"},
+        timeout=30
+    ).json()
 
-    if b2c_response and not b2c_response.get("error"):
-        # B2C request successfully sent to Safaricom. The actual payment status
-        # will come via the b2c-callback.
+    if b2c_response and b2c_response.get("ResponseCode") == "0":
         await db.transactions.update_one(
             {"transaction_id": transaction_id},
             {"$set": {
-                "status": "pending_b2c_callback", # Awaiting callback for final status
+                "status": "pending_b2c_callback",
                 "b2c_conversation_id": b2c_response.get('ConversationID'),
-                "b2c_originator_id": b2c_response.get('OriginatorConverstionID')
+                "b2c_originator_id": b2c_response.get('OriginatorConversationID'),
+                "mpesa_raw_init_response": b2c_response # Store initial response
             }}
         )
         return {
             "success": True,
             "message": f"Withdrawal request of KSH {withdrawal_data.amount} submitted. You will receive your funds shortly.",
             "transaction_id": transaction_id,
-            "b2c_response_details": b2c_response # Include for debugging if needed
+            "b2c_response_details": b2c_response
         }
     else:
-        # B2C request failed to be sent to Safaricom. Refund user and mark transaction failed.
-        print(f"B2C initiation failed for transaction {transaction_id}: {b2c_response}")
+        logging.error(f"B2C initiation failed for transaction {transaction_id}: {b2c_response}")
         await db.users.update_one(
             {"user_id": current_user['user_id']},
-            {"$inc": {"wallet_balance": withdrawal_data.amount}} # Refund
+            {"$inc": {"wallet_balance": withdrawal_data.amount}}
         )
         await db.transactions.update_one(
             {"transaction_id": transaction_id},
-            {"$set": {"status": "failed", "processed_at": datetime.utcnow(), "error_message": b2c_response.get("error", "Unknown B2C initiation error")}}
+            {"$set": {"status": "failed", "processed_at": datetime.utcnow(), "error_message": b2c_response.get("ResponseDescription", "Unknown B2C initiation error")}}
         )
-        raise HTTPException(status_code=500, detail="Failed to initiate withdrawal with M-Pesa. Please try again.")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to initiate withdrawal with M-Pesa. Please try again.")
 
-@app.post("/api/payments/b2c-callback")
+@app.post("/api/payments/b2c-callback", summary="M-Pesa B2C Result Callback Endpoint (Internal)")
 async def mpesa_b2c_callback(request: Request):
-    """
-    Handles the asynchronous M-Pesa B2C (withdrawal) callback from Safaricom.
-    This endpoint receives the final status of the B2C transaction.
-    """
     payload = await request.json()
-    print(f"M-Pesa B2C Callback Received: {json.dumps(payload, indent=2)}")
+    logging.info(f"M-Pesa B2C Callback Received: {json.dumps(payload, indent=2)}")
 
     result = payload.get("Result", {})
+    originator_conversation_id = result.get("OriginatorConversationID")
+    result_code = result.get("ResultCode")
+    result_desc = result.get("ResultDesc")
 
-    # Extract transaction_id from the ResultParameters (your 'Occassion' value)
-    transaction_id = None
-    if "ResultParameters" in result and "ResultParameter" in result["ResultParameters"]:
-        for param in result["ResultParameters"]["ResultParameter"]:
-            if param.get("Key") == "Occasion": # Note: M-Pesa might return "Occasion" not "Occassion"
-                transaction_id = param.get("Value")
-                break # Found transaction_id, exit loop
+    # The Occasion field from the initial request is often found in ResultParameters
+    result_parameters = result.get("ResultParameters", {}).get("ResultParameter", [])
+    transaction_id_from_occasion = next((item['Value'] for item in result_parameters if item['Key'] == 'Occasion'), None)
 
-    # Also try to extract from 'ReferenceData' if 'Occasion' is not directly in ResultParameters
-    if not transaction_id and "ReferenceData" in result and "ReferenceItem" in result["ReferenceData"]:
-        for item in result["ReferenceData"]["ReferenceItem"]:
-            if item.get("Key") == "Occasion":
-                transaction_id = item.get("Value")
-                break # Found transaction_id, exit loop
+    # Use the transaction_id from Occasion or OriginatorConversationID for lookup
+    transaction = await db.transactions.find_one({
+        "$or": [
+            {"transaction_id": transaction_id_from_occasion},
+            {"b2c_originator_id": originator_conversation_id}
+        ],
+        "status": "pending_b2c_callback"
+    })
 
-    if not transaction_id:
-        print("Error: B2C callback received without identifiable transaction_id ('Occasion').")
-        return JSONResponse({"ResultCode": 0, "ResultDesc": "B2C Callback Processed"}, status_code=200)
-
-    result_code = int(result.get("ResultCode", 1)) # 0 = success, others are errors
-
-    transaction = await db.transactions.find_one({"transaction_id": transaction_id, "type": "withdrawal"})
     if not transaction:
-        print(f"Warning: Withdrawal transaction not found for transaction_id: {transaction_id}. Cannot process callback.")
-        return JSONResponse({"ResultCode": 0, "ResultDesc": "B2C Callback Processed"}, status_code=200)
+        logging.warning(f"B2C Callback: Transaction not found for Occasion/OriginatorConversationID: {transaction_id_from_occasion}/{originator_conversation_id}. Maybe already processed or invalid.")
+        return JSONResponse(content={"ResultCode": 0, "ResultDesc": "Callback received"}, status_code=200)
 
     user = await db.users.find_one({"user_id": transaction['user_id']})
     if not user:
-        print(f"Error: User not found for withdrawal transaction {transaction['transaction_id']}. Cannot update user data.")
-        return JSONResponse({"ResultCode": 0, "ResultDesc": "B2C Callback Processed"}, status_code=200)
+        logging.error(f"B2C Callback: User not found for transaction {transaction['transaction_id']}. Cannot update wallet.")
+        return JSONResponse(content={"ResultCode": 0, "ResultDesc": "Callback received"}, status_code=200)
 
     update_fields = {
         "processed_at": datetime.utcnow(),
-        "mpesa_result_code": result_code,
-        "mpesa_result_description": result.get("ResultDesc"),
-        "mpesa_conversation_id": payload.get("ConversationID"), # Store the ConversationID from the callback
-        "mpesa_originator_id": payload.get("OriginatorConversationID") # Store the OriginatorConversationID
+        "b2c_callback_received": True,
+        "b2c_result_code": result_code,
+        "b2c_result_description": result_desc,
+        "mpesa_raw_callback": payload # Store raw callback for auditing
     }
 
-    if result_code == 0: # Withdrawal was successful
-        update_fields["status"] = "completed"
-        # Extract specific details like MpesaReceiptNumber if available and needed
-        mpesa_receipt_number = next((item['Value'] for item in result.get("ResultParameters", {}).get("ResultParameter", []) if item['Key'] == 'MpesaReceiptNumber'), None)
-        if mpesa_receipt_number:
-            update_fields["mpesa_receipt"] = mpesa_receipt_number
+    if result_code == 0: # B2C withdrawal was successful
+        amount_withdrawn = next((item['Value'] for item in result_parameters if item['Key'] == 'Amount'), None)
+        mpesa_receipt_number = next((item['Value'] for item in result_parameters if item['Key'] == 'TransactionID'), None)
 
-        await db.transactions.update_one(
-            {"_id": transaction['_id']},
-            {"$set": update_fields}
+        update_fields["status"] = "completed"
+        update_fields["mpesa_receipt"] = mpesa_receipt_number
+        update_fields["amount_processed"] = float(amount_withdrawn) if amount_withdrawn else transaction['amount']
+
+        await db.users.update_one(
+            {"user_id": user['user_id']},
+            {"$inc": {"total_withdrawn": update_fields['amount_processed']}}
         )
+
         await create_notification({
             "title": "Withdrawal Successful!",
-            "message": f"Your withdrawal of KSH {transaction['amount']:.2f} has been processed.",
-            "user_id": transaction['user_id']
+            "message": f"Your withdrawal of KSH {update_fields['amount_processed']:.2f} has been sent to your M-Pesa. Receipt: {mpesa_receipt_number}.",
+            "user_id": user['user_id']
         })
-        print(f"B2C Withdrawal Success: Transaction ID={transaction_id}, Receipt={mpesa_receipt_number}")
-    else: # Withdrawal failed
+        logging.info(f"B2C Success: Transaction {transaction['transaction_id']} for User {user['user_id']} completed. Amount: {update_fields['amount_processed']:.2f}, Receipt: {mpesa_receipt_number}")
+
+    else: # B2C withdrawal failed
         update_fields["status"] = "failed"
+        update_fields["error_message"] = result_desc
 
-        # Refund the user's wallet balance if the withdrawal failed
-        current_wallet_balance_before_refund = user['wallet_balance'] # Get current balance before adding back
+        refund_amount = transaction['amount']
         await db.users.update_one(
-            {"user_id": transaction['user_id']},
-            {"$inc": {"wallet_balance": transaction['amount']}}
+            {"user_id": user['user_id']},
+            {"$inc": {"wallet_balance": refund_amount}}
         )
-        print(f"B2C Withdrawal Failed: Transaction ID={transaction_id}. Refunded KSH {transaction['amount']:.2f} to user {user['user_id']}. Old balance: {current_wallet_balance_before_refund}, New balance: {current_wallet_balance_before_refund + transaction['amount']}.")
 
-        await db.transactions.update_one(
-            {"_id": transaction['_id']},
-            {"$set": update_fields}
-        )
         await create_notification({
-            "title": "Withdrawal Failed!",
-            "message": f"Your withdrawal of KSH {transaction['amount']:.2f} could not be processed and has been refunded. Reason: {result.get('ResultDesc', 'Unknown error')}",
-            "user_id": transaction['user_id']
+            "title": "Withdrawal Failed",
+            "message": f"Your withdrawal of KSH {refund_amount:.2f} failed. Funds have been returned to your wallet. Reason: {result_desc}.",
+            "user_id": user['user_id']
         })
-        print(f"B2C Withdrawal Failed: Transaction ID={transaction_id}, ResultCode={result_code}, ResultDesc={result.get('ResultDesc')}")
+        logging.warning(f"B2C Failed: Transaction {transaction['transaction_id']} for User {user['user_id']} failed. Reason: {result_desc}. Amount {refund_amount:.2f} refunded.")
 
-    # Always return 200 OK to M-Pesa to acknowledge receipt of the callback.
-    return JSONResponse({"ResultCode": 0, "ResultDesc": "B2C Callback Processed"}, status_code=200)
+    await db.transactions.update_one(
+        {"_id": transaction['_id']},
+        {"$set": update_fields}
+    )
 
-# Optional: B2C Timeout URL (M-Pesa calls this if the transaction takes too long/times out)
-@app.post("/api/payments/b2c-timeout")
-async def mpesa_b2c_timeout(request: Request):
+    return JSONResponse(content={"ResultCode": 0, "ResultDesc": "Callback received"}, status_code=200)
+
+@app.post("/api/payments/b2c-timeout", summary="M-Pesa B2C Timeout Callback Endpoint (Internal)")
+async def mpesa_b2c_timeout_callback(request: Request):
     payload = await request.json()
-    print(f"M-Pesa B2C Timeout Callback Received: {json.dumps(payload, indent=2)}")
-    # Here you would typically mark the transaction as 'timed_out' or 'failed'
-    # and potentially refund the user if the initial deduction happened.
-    # Logic similar to b2c-callback but specifically for timeouts.
-    return JSONResponse({"ResultCode": 0, "ResultDesc": "B2C Timeout Processed"}, status_code=200)
+    logging.warning(f"M-Pesa B2C Timeout Callback Received: {json.dumps(payload, indent=2)}")
 
-# --- Task Management ---
+    timeout_data = payload.get("Result", {})
+    originator_conversation_id = timeout_data.get("OriginatorConversationID")
+    result_code = timeout_data.get("ResultCode")
+    result_desc = timeout_data.get("ResultDesc")
+    transaction_id_from_occasion = timeout_data.get("Occasion")
 
-@app.on_event("startup")
-async def startup_event():
-    """
-    Populates initial task templates if the collection is empty.
-    This runs once when the FastAPI application starts up.
-    """
-    template_count = await db.tasks_template.count_documents({})
-    if template_count == 0:
-        templates = [
-            {
-                "template_id": str(uuid.uuid4()),
-                "title": "Complete Daily Survey",
-                "description": "Answer 10 questions about consumer preferences",
-                "reward": 25.0,
-                "type": "survey",
-                "requirements": {"questions": 10, "time_limit": 300, "file_upload": False},
-                "is_active": True,
-                "created_at": datetime.utcnow()
-            },
-            {
-                "template_id": str(uuid.uuid4()),
-                "title": "Watch Advertisement",
-                "description": "Watch a 30-second advertisement completely",
-                "reward": 5.0,
-                "type": "ad",
-                "requirements": {"duration": 30, "interaction": True, "file_upload": False},
-                "is_active": True,
-                "created_at": datetime.utcnow()
-            },
-            {
-                "template_id": str(uuid.uuid4()),
-                "title": "Write Online Article",
-                "description": "Write a 300-word article and upload as DOC or PDF.",
-                "reward": 50.0,
-                "type": "writing",
-                "requirements": {"min_words": 300, "file_upload": True},
-                "is_active": True,
-                "created_at": datetime.utcnow()
-            },
-            {
-                "template_id": str(uuid.uuid4()),
-                "title": "Share on Social Media",
-                "description": "Share our platform on your social media",
-                "reward": 15.0,
-                "type": "social",
-                "requirements": {"platforms": ["facebook", "twitter", "whatsapp"], "file_upload": False},
-                "is_active": True,
-                "created_at": datetime.utcnow()
-            }
-        ]
-        await db.tasks_template.insert_many(templates)
-        print("Task templates initialized in MongoDB.")
-
-@app.get("/api/tasks/available")
-async def get_available_tasks(current_user: dict = Depends(get_current_user)):
-    """
-    Retrieves tasks available for the current user to complete.
-    Users must be activated and tasks not completed within the last 24 hours.
-    """
-    if not current_user['is_activated']:
-        raise HTTPException(status_code=400, detail="Account must be activated to access tasks.")
-
-    now = datetime.utcnow()
-    # Find tasks completed by this user in the last 24 hours
-    recent_completions = await db.task_completions.find({
-        "user_id": current_user['user_id'],
-        "created_at": {"$gte": now - timedelta(hours=24)}
-    }).distinct("template_id") # Get unique template_ids completed
-
-    # Find active tasks not in the recently completed list
-    tasks = await db.tasks_template.find({
-        "template_id": {"$nin": recent_completions},
-        "is_active": True
-    }).to_list(20) # Limit to 20 available tasks
-
-    return {
-        "success": True,
-        "tasks": fix_mongo_ids(tasks)
-    }
-
-@app.post("/api/tasks/complete")
-async def complete_task(
-    request: Request,
-    task_id: str = Form(...),
-    completion_data: str = Form(None), # JSON string for survey answers, etc.
-    file: UploadFile = File(None), # For tasks requiring file uploads
-    current_user: dict = Depends(get_current_user)
-):
-    """
-    Allows a user to complete a task and receive a reward.
-    Handles file uploads for specific task types.
-    """
-    if not current_user['is_activated']:
-        raise HTTPException(status_code=400, detail="Account must be activated to complete tasks.")
-
-    task = await db.tasks_template.find_one({"template_id": task_id, "is_active": True})
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found or inactive.")
-
-    now = datetime.utcnow()
-    # Check if the user already completed this specific task today
-    existing_completion = await db.task_completions.find_one({
-        "user_id": current_user['user_id'],
-        "template_id": task_id,
-        "created_at": {"$gte": now - timedelta(hours=24)}
+    transaction = await db.transactions.find_one({
+        "$or": [
+            {"transaction_id": transaction_id_from_occasion},
+            {"b2c_originator_id": originator_conversation_id}
+        ],
+        "status": "pending_b2c_callback"
     })
-    if existing_completion:
-        raise HTTPException(status_code=400, detail="Task already completed today. Please try again tomorrow.")
 
-    completion_doc = {
-        "completion_id": str(uuid.uuid4()),
-        "user_id": current_user['user_id'],
-        "template_id": task_id,
-        "completion_data": json.loads(completion_data) if completion_data else {},
-        "reward_amount": task['reward'],
-        "status": "completed", # Assuming auto-approval for now
-        "created_at": datetime.utcnow()
+    if not transaction:
+        logging.warning(f"B2C Timeout: Transaction not found for Occasion/OriginatorConversationID: {transaction_id_from_occasion}/{originator_conversation_id}. Maybe already processed or invalid.")
+        return JSONResponse(content={"ResultCode": 0, "ResultDesc": "Timeout Callback received"}, status_code=200)
+
+    user = await db.users.find_one({"user_id": transaction['user_id']})
+    if not user:
+        logging.error(f"B2C Timeout: User not found for transaction {transaction['transaction_id']}. Cannot update wallet.")
+        return JSONResponse(content={"ResultCode": 0, "ResultDesc": "Timeout Callback received"}, status_code=200)
+
+    update_fields = {
+        "processed_at": datetime.utcnow(),
+        "status": "timeout_or_unknown_failed",
+        "b2c_timeout_callback_received": True,
+        "b2c_result_code": result_code,
+        "b2c_result_description": result_desc,
+        "mpesa_raw_callback": payload, # Store raw callback for auditing
+        "error_message": "M-Pesa B2C request timed out or final status unknown."
     }
 
-    # Handle file uploads if required by the task
-    if task['requirements'].get('file_upload', False):
-        if not file:
-            raise HTTPException(status_code=400, detail="File upload required for this task.")
-
-        file_ext = os.path.splitext(file.filename)[-1].lower()
-        if file_ext not in [".doc", ".docx", ".pdf", ".jpg", ".jpeg", ".png"]: # Extended allowed file types
-            raise HTTPException(status_code=400, detail="Invalid file type. Only DOC, DOCX, PDF, JPG, PNG allowed.")
-
-        # Define upload directory and create if it doesn't exist
-        upload_dir = "uploads"
-        os.makedirs(upload_dir, exist_ok=True)
-
-        # Save the file with a unique name
-        file_id = str(uuid.uuid4())
-        file_path = os.path.join(upload_dir, f"{file_id}{file_ext}")
-
-        try:
-            with open(file_path, "wb") as f:
-                content = await file.read()
-                f.write(content)
-            completion_doc['file_path'] = file_path
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to save uploaded file: {e}")
-
-    await db.task_completions.insert_one(completion_doc)
-
-    # Update user's wallet and earnings
+    refund_amount = transaction['amount']
     await db.users.update_one(
-        {"user_id": current_user['user_id']},
-        {
-            "$inc": {
-                "wallet_balance": task['reward'],
-                "task_earnings": task['reward'],
-                "total_earned": task['reward']
-            }
-        }
+        {"user_id": user['user_id']},
+        {"$inc": {"wallet_balance": refund_amount}}
+    )
+
+    await db.transactions.update_one(
+        {"_id": transaction['_id']},
+        {"$set": update_fields}
     )
 
     await create_notification({
-        "title": "Task Completed!",
-        "message": f"You earned KSH {task['reward']:.2f} for completing '{task['title']}'",
-        "user_id": current_user['user_id']
+        "title": "Withdrawal Status Unknown",
+        "message": f"Your withdrawal of KSH {refund_amount:.2f} had an unknown issue with M-Pesa or timed out. Funds have been returned to your wallet. Please check your M-Pesa statement and try again later.",
+        "user_id": user['user_id']
     })
+    logging.warning(f"B2C Timeout: Transaction {transaction['transaction_id']} for User {user['user_id']} timed out. Amount {refund_amount:.2f} refunded.")
 
-    return {
-        "success": True,
-        "message": f"Task completed! You earned KSH {task['reward']:.2f}.",
-        "reward": task['reward'],
-        "new_balance": current_user['wallet_balance'] + task['reward'] # Return updated balance for immediate client update
-    }
+    return JSONResponse(content={"ResultCode": 0, "ResultDesc": "Timeout Callback received"}, status_code=200)
 
-# --- Referral System ---
+# --- Task Management Routes ---
+@app.post("/api/tasks", status_code=status.HTTP_201_CREATED, summary="Create a new task (Admin Only)")
+async def create_task(
+    task_data: TaskCreate,
+    current_user: Annotated[Dict[str, Any], Depends(get_current_user)],
+    # Only 'admin' role can create tasks
+    has_admin_role: Annotated[bool, Depends(RoleChecker(["admin"]))]
+):
+    task_doc = task_data.dict()
+    task_doc["task_id"] = str(uuid.uuid4())
+    task_doc["created_at"] = datetime.utcnow()
+    task_doc["created_by"] = current_user['user_id']
+    await db.tasks.insert_one(task_doc)
+    return {"success": True, "message": "Task created successfully", "task_id": task_doc["task_id"]}
 
-@app.get("/api/referrals/stats")
-async def get_referral_stats(current_user: dict = Depends(get_current_user)):
-    """
-    Retrieves statistics about a user's referrals.
-    """
-    referrals = await db.referrals.find({"referrer_id": current_user['user_id']}).to_list(100)
+@app.get("/api/tasks", summary="Get all available tasks")
+async def get_tasks(current_user: Annotated[Dict[str, Any], Depends(get_current_user)]):
+    tasks = await db.tasks.find({}).to_list(100)
+    return {"success": True, "tasks": fix_mongo_ids(tasks)}
 
-    # Calculate aggregated stats
-    stats = {
-        "total_referrals": len(referrals),
-        "pending_referrals": len([r for r in referrals if r['status'] == 'pending']),
-        "activated_referrals": len([r for r in referrals if r['status'] in ['activated', 'rewarded']]),
-        "total_earnings": sum(r.get('reward_amount', 0) for r in referrals if r['status'] == 'rewarded'),
-        "referral_code": current_user['referral_code'],
-        "referrals": fix_mongo_ids(referrals) # Return detailed list of referrals
-    }
-    return {"success": True, "stats": stats}
+@app.post("/api/tasks/complete", summary="Submit task completion")
+async def complete_task(
+    completion_data: TaskCompletion,
+    current_user: Annotated[Dict[str, Any], Depends(get_current_user)]
+):
+    user_id = current_user['user_id']
 
-async def process_referral_reward(referred_user_id: str, referrer_id: str):
-    """
-    Awards the referrer when a referred user activates their account.
-    """
-    referral = await db.referrals.find_one({
-        "referred_id": referred_user_id,
-        "referrer_id": referrer_id,
-        "status": "pending"
+    if not current_user['is_activated']:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Please activate your account to complete tasks and earn.")
+
+    task = await db.tasks.find_one({"task_id": completion_data.task_id})
+    if not task:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+
+    existing_completion = await db.task_completions.find_one({
+        "user_id": user_id,
+        "task_id": completion_data.task_id,
+        "status": {"$in": ["pending", "completed"]}
     })
+    if existing_completion:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You have already completed this task.")
 
-    if referral:
-        reward_amount = referral['reward_amount']
+    completion_doc = {
+        "completion_id": str(uuid.uuid4()),
+        "user_id": user_id,
+        "task_id": completion_data.task_id,
+        "completion_data": completion_data.completion_data,
+        "status": "pending",
+        "reward_amount": task['reward'],
+        "completed_at": datetime.utcnow()
+    }
+    await db.task_completions.insert_one(completion_doc)
 
-        # Update referral status to 'rewarded'
-        await db.referrals.update_one(
-            {"referral_id": referral['referral_id']},
-            {
-                "$set": {
-                    "status": "rewarded",
-                    "activation_date": datetime.utcnow()
-                }
-            }
-        )
-
-        # Update referrer's wallet balance and earnings
+    if task.get("auto_approve", True):
+        new_balance = current_user['wallet_balance'] + task['reward']
         await db.users.update_one(
-            {"user_id": referrer_id},
-            {
-                "$inc": {
-                    "wallet_balance": reward_amount,
-                    "referral_earnings": reward_amount,
-                    "total_earned": reward_amount,
-                    "referral_count": 1
-                }
-            }
+            {"user_id": user_id},
+            {"$set": {"wallet_balance": new_balance}, "$inc": {"task_earnings": task['reward']}}
         )
-
+        await db.task_completions.update_one(
+            {"_id": completion_doc['_id']},
+            {"$set": {"status": "completed", "approved_at": datetime.utcnow()}}
+        )
         await create_notification({
-            "title": "Referral Bonus!",
-            "message": f"You earned KSH {reward_amount:.2f} from a successful referral!",
-            "user_id": referrer_id
+            "title": "Task Completed!",
+            "message": f"You've successfully completed '{task['title']}' and earned KSH {task['reward']:.2f}.",
+            "user_id": user_id
         })
-        print(f"Referral reward processed: User {referrer_id} earned KSH {reward_amount} from {referred_user_id}'s activation.")
+        return {"success": True, "message": "Task completed and reward credited!", "reward": task['reward']}
+    else:
+        await create_notification({
+            "title": "Task Submitted for Review",
+            "message": f"Your completion for '{task['title']}' has been submitted for review. Reward will be credited upon approval.",
+            "user_id": user_id
+        })
+        return {"success": True, "message": "Task submitted for review. Reward will be credited after approval."}
 
-# --- Notification System ---
-
-async def create_notification(notification_data: dict):
-    """
-    Helper function to create a new notification in the database.
-    Can be user-specific or a broadcast.
-    """
-    notification_doc = {
-        "notification_id": str(uuid.uuid4()),
-        "title": notification_data['title'],
-        "message": notification_data['message'],
-        "user_id": notification_data.get('user_id'), # Optional: if None, it's a broadcast
-        "is_read": False,
-        "created_at": datetime.utcnow()
-    }
-    await db.notifications.insert_one(notification_doc)
-
-@app.post("/api/notifications/create")
-async def create_notification_endpoint(notification_data: NotificationCreate):
-    """
-    API endpoint to manually create a notification (e.g., by admin).
-    """
-    await create_notification(notification_data.dict())
-    return {"success": True, "message": "Notification created."}
-
-@app.get("/api/notifications")
-async def get_notifications(current_user: dict = Depends(get_current_user)):
-    """
-    Retrieves notifications relevant to the current user (user-specific or broadcasts).
-    """
+# --- Notifications Routes ---
+@app.get("/api/notifications", summary="Get user-specific and broadcast notifications")
+async def get_notifications(current_user: Annotated[Dict[str, Any], Depends(get_current_user)]):
+    user_id = current_user['user_id']
     notifications = await db.notifications.find(
-        {"$or": [{"user_id": current_user['user_id']}, {"user_id": None}]}
-    ).sort("created_at", -1).limit(20).to_list(20)
+        {"$or": [{"user_id": user_id}, {"user_id": None}]}
+    ).sort("created_at", -1).to_list(20)
+
     return {"success": True, "notifications": fix_mongo_ids(notifications)}
 
-@app.put("/api/notifications/{notification_id}/read")
-async def mark_notification_read(notification_id: str, current_user: dict = Depends(get_current_user)):
-    """
-    Marks a specific notification as read for the user.
-    """
-    # Optional: Add a check to ensure current_user['user_id'] matches notification['user_id']
-    # to prevent one user from marking another's notification as read.
-    await db.notifications.update_one(
-        {"notification_id": notification_id},
+@app.post("/api/notifications/{notification_id}/read", summary="Mark a notification as read")
+async def mark_notification_as_read(
+    notification_id: str,
+    current_user: Annotated[Dict[str, Any], Depends(get_current_user)]
+):
+    result = await db.notifications.update_one(
+        {"notification_id": notification_id, "user_id": current_user['user_id']},
         {"$set": {"is_read": True}}
     )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notification not found or not authorized.")
     return {"success": True, "message": "Notification marked as read."}
 
-# --- User Settings ---
+@app.post("/api/admin/notifications/broadcast", summary="Broadcast a notification (Admin Only)")
+async def broadcast_notification(
+    notification_data: NotificationCreate,
+    current_user: Annotated[Dict[str, Any], Depends(get_current_user)],
+    # Only 'admin' role can broadcast notifications
+    has_admin_role: Annotated[bool, Depends(RoleChecker(["admin"]))]
+):
+    notification_data.user_id = None # Explicitly set to None for broadcast
+    await create_notification(notification_data.dict())
+    return {"success": True, "message": "Broadcast notification sent."}
 
-@app.put("/api/settings/theme")
-async def update_theme(theme: str, current_user: dict = Depends(get_current_user)):
-    """
-    Allows a user to update their preferred theme (light/dark).
-    """
-    if theme not in ['light', 'dark']:
-        raise HTTPException(status_code=400, detail="Invalid theme. Must be 'light' or 'dark'.")
+# --- User Profile & Settings ---
+@app.get("/api/user/profile", response_model=UserProfile, summary="Get current user profile")
+async def get_user_profile(current_user: Annotated[Dict[str, Any], Depends(get_current_user)]):
+    return UserProfile(**current_user)
+
+@app.put("/api/user/profile", response_model=UserProfile, summary="Update current user profile")
+async def update_user_profile(
+    full_name: Optional[str] = Form(None),
+    phone: Optional[str] = Form(None),
+    notifications_enabled: Optional[bool] = Form(None),
+    theme: Optional[str] = Form(None),
+    current_user: Annotated[Dict[str, Any], Depends(get_current_user)]
+):
+    update_data = {}
+    if full_name:
+        update_data["full_name"] = full_name
+    if phone:
+        if not phone.startswith("254") or len(phone) != 12 or not phone[3:].isdigit():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid phone number format. Use E.164 (e.g., 2547XXXXXXXX).")
+        update_data["phone"] = phone
+    if notifications_enabled is not None:
+        update_data["notifications_enabled"] = notifications_enabled
+    if theme:
+        if theme not in ["light", "dark"]:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid theme. Must be 'light' or 'dark'.")
+        update_data["theme"] = theme
+
+    if not update_data:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No update data provided.")
 
     await db.users.update_one(
         {"user_id": current_user['user_id']},
-        {"$set": {"theme": theme}}
+        {"$set": update_data}
     )
-    return {"success": True, "message": f"Theme updated to {theme}."}
+    updated_user = await db.users.find_one({"user_id": current_user['user_id']})
+    return UserProfile(**updated_user)
 
-# --- Main Entrypoint ---
+@app.put("/api/user/change-password", summary="Change user password")
+async def change_password(
+    old_password: str = Form(...),
+    new_password: str = Form(...),
+    current_user: Annotated[Dict[str, Any], Depends(get_current_user)]
+):
+    if not verify_password(old_password, current_user['password']):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid old password.")
 
-if __name__ == "__main__":
-    import uvicorn
-    # Make sure your MongoDB is running and accessible
-    # This will run the FastAPI app on 0.0.0.0:8001
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    if len(new_password) < 6:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="New password must be at least 6 characters long.")
+
+    hashed_new_password = hash_password(new_password)
+    await db.users.update_one(
+        {"user_id": current_user['user_id']},
+        {"$set": {"password": hashed_new_password}}
+    )
+    return {"success": True, "message": "Password changed successfully."}
+
+# --- Admin Endpoints (Protected by RoleChecker) ---
+@app.get("/api/admin/users", response_model=List[UserProfile], summary="Get all users (Admin Only)")
+async def get_all_users(
+    skip: int = 0,
+    limit: int = 100,
+    current_user: Annotated[Dict[str, Any], Depends(get_current_user)],
+    has_admin_role: Annotated[bool, Depends(RoleChecker(["admin"]))] # Requires 'admin' role
+):
+    users_cursor = db.users.find({}).skip(skip).limit(limit)
+    users = []
+    async for user_doc in users_cursor:
+        users.append(UserProfile(**user_doc))
+    return users
+
+@app.put("/api/admin/users/{user_id}/role", response_model=UserProfile, summary="Update user role (Admin Only)")
+async def update_user_role(
+    user_id: str,
+    new_role: str = Form(...),
+    current_user: Annotated[Dict[str, Any], Depends(get_current_user)],
+    has_admin_role: Annotated[bool, Depends(RoleChecker(["admin"]))] # Requires 'admin' role
+):
+    if new_role not in ["user", "admin"]: # Define allowed roles
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid role specified. Must be 'user' or 'admin'.")
+
+    update_result = await db.users.update_one(
+        {"user_id": user_id},
+        {"$set": {"role": new_role, "last_login": datetime.utcnow()}} # Use last_login as a simple update timestamp
+    )
+    if update_result.matched_count == 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    
+    updated_user = await db.users.find_one({"user_id": user_id})
+    return UserProfile(**updated_user)
+
+
+@app.get("/api/admin/transactions", summary="Get all transactions (Admin Only)")
+async def get_all_transactions(
+    skip: int = 0,
+    limit: int = 100,
+    transaction_type: Optional[str] = None,
+    status_filter: Optional[str] = None, # Renamed to avoid conflict with HTTP status
+    current_user: Annotated[Dict[str, Any], Depends(get_current_user)],
+    has_admin_role: Annotated[bool, Depends(RoleChecker(["admin"]))] # Requires 'admin' role
+):
+    query = {}
+    if transaction_type:
+        query["type"] = transaction_type
+    if status_filter:
+        query["status"] = status_filter
+    
+    transactions = await db.transactions.find(query).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+    return {"success": True, "transactions": fix_mongo_ids(transactions)}
+
+
+# --- Root Endpoint ---
+@app.get("/", summary="API Root")
+async def read_root():
+    return {"message": "Welcome to the EarnPlatform API! Visit /docs for API documentation."}
+
