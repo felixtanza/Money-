@@ -43,15 +43,15 @@ MPESA_PASSKEY = os.environ.get('MPESA_PASSKEY', 'bfb279f9aa9bdbcf158e97dd71a467c
 
 # M-Pesa API Endpoints (Production URLs)
 # For production, change these from sandbox to live API URLs.
-MPESA_AUTH_URL = "[https://api.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials](https://api.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials)" # Production Auth URL
-MPESA_STK_PUSH_URL = "[https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest](https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest)" # Production STK Push URL
-MPESA_B2C_URL = "[https://api.safaricom.co.ke/mpesa/b2c/v1/paymentrequest](https://api.safaricom.co.ke/mpesa/b2c/v1/paymentrequest)" # Production B2C URL
+MPESA_AUTH_URL = "https://api.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials" # Production Auth URL
+MPESA_STK_PUSH_URL = "https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest" # Production STK Push URL
+MPESA_B2C_URL = "https://api.safaricom.co.ke/mpesa/b2c/v1/paymentrequest" # Production B2C URL
 
 # M-Pesa Callback URLs - These MUST be your public Render domain URLs.
 # Configure these exact URLs in your Daraja API application settings.
-MPESA_CALLBACK_URL = os.environ.get('MPESA_CALLBACK_URL', '[https://your-render-app-name.onrender.com/api/payments/stk-callback](https://your-render-app-name.onrender.com/api/payments/stk-callback)')
-MPESA_B2C_RESULT_URL = os.environ.get('MPESA_B2C_RESULT_URL', '[https://your-render-app-name.onrender.com/api/payments/b2c-callback](https://your-render-app-name.onrender.com/api/payments/b2c-callback)')
-MPESA_B2C_TIMEOUT_URL = os.environ.get('MPESA_B2C_TIMEOUT_URL', '[https://your-render-app-name.onrender.com/api/payments/b2c-timeout](https://your-render-app-name.onrender.com/api/payments/b2c-timeout)')
+MPESA_CALLBACK_URL = os.environ.get('MPESA_CALLBACK_URL', 'https://your-render-app-name.onrender.com/api/payments/stk-callback')
+MPESA_B2C_RESULT_URL = os.environ.get('MPESA_B2C_RESULT_URL', 'https://your-render-app-name.onrender.com/api/payments/b2c-callback')
+MPESA_B2C_TIMEOUT_URL = os.environ.get('MPESA_B2C_TIMEOUT_URL', 'https://your-render-app-name.onrender.com/api/payments/b2c-timeout')
 
 # M-Pesa B2C (Withdrawal) Credentials
 # MPESA_INITIATOR is the username for B2C (usually your paybill number's shortcode)
@@ -69,7 +69,7 @@ app = FastAPI(title="EarnPlatform API", version="1.0.0")
 # In production, restrict allow_origins to your frontend domain(s) for security.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Example: ["[https://your-frontend-domain.com](https://your-frontend-domain.com)", "http://localhost:3000"]
+    allow_origins=["*"], # Example: ["https://your-frontend-domain.com", "http://localhost:3000"]
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -1077,11 +1077,11 @@ async def get_user_profile(current_user: Annotated[Dict[str, Any], Depends(get_c
 
 @app.put("/api/user/profile", response_model=UserProfile, summary="Update current user profile")
 async def update_user_profile(
+    current_user: Annotated[Dict[str, Any], Depends(get_current_user)], # Moved to the start
     full_name: Optional[str] = Form(None),
     phone: Optional[str] = Form(None),
     notifications_enabled: Optional[bool] = Form(None),
-    theme: Optional[str] = Form(None),
-    current_user: Annotated[Dict[str, Any], Depends(get_current_user)]
+    theme: Optional[str] = Form(None)
 ):
     update_data = {}
     if full_name:
