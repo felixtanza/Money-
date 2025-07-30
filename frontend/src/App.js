@@ -36,6 +36,7 @@ const AuthPage = ({ onLogin }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [formData, setFormData] = useState({
     email: '',
+    username: '', // <--- ADDED: Username field
     password: '',
     full_name: '',
     phone: '',
@@ -71,6 +72,7 @@ const AuthPage = ({ onLogin }) => {
   const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   const phonePattern = /^254\d{9}$/;
   const passwordPattern = /^.{6,}$/;
+  const usernamePattern = /^[a-zA-Z0-9_]{3,20}$/; // Basic username validation
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -81,6 +83,14 @@ const AuthPage = ({ onLogin }) => {
         showNotification({
           title: 'Validation Error',
           message: 'Full Name is required.',
+          type: 'error'
+        });
+        return;
+      }
+      if (!usernamePattern.test(formData.username)) { // <--- ADDED: Username validation
+        showNotification({
+          title: 'Validation Error',
+          message: 'Username must be 3-20 characters, alphanumeric or underscores.',
           type: 'error'
         });
         return;
@@ -135,9 +145,14 @@ const AuthPage = ({ onLogin }) => {
         });
         onLogin(data.user);
       } else {
+        // IMPROVED ERROR HANDLING: Display detailed backend error if available
+        const errorMessage = data.detail && Array.isArray(data.detail)
+          ? data.detail.map(err => err.msg).join(', ')
+          : data.detail || 'Authentication failed';
+
         showNotification({
           title: 'Error',
-          message: data.detail || 'Authentication failed',
+          message: errorMessage,
           type: 'error'
         });
       }
@@ -190,6 +205,19 @@ const AuthPage = ({ onLogin }) => {
                 />
               </div>
               <div className="form-group">
+                <input // <--- ADDED: Username input field
+                  type="text"
+                  placeholder="Username"
+                  value={formData.username}
+                  onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                  required
+                  className="form-input"
+                  autoComplete="username"
+                  pattern="^[a-zA-Z0-9_]{3,20}$"
+                  title="Username must be 3-20 characters, alphanumeric or underscores."
+                />
+              </div>
+              <div className="form-group">
                 <input
                   type="tel"
                   placeholder="Phone Number (254XXXXXXXXX)"
@@ -206,6 +234,7 @@ const AuthPage = ({ onLogin }) => {
                   type="text"
                   placeholder="Referral Code (Optional)"
                   value={formData.referral_code}
+                  onChange={(e) => setFormData({ ...formData, referral_code: e.target.value })} // Changed to allow manual input if not from URL
                   readOnly={referralCodeLocked}
                   disabled={referralCodeLocked}
                   className={`form-input ${referralCodeLocked ? 'locked' : ''}`}
@@ -307,7 +336,7 @@ const TaskCard = ({ task, onComplete, completed = false }) => {
   const getTaskIcon = (type) => {
     switch (type) {
       case 'survey': return '📋';
-      case 'ad': return '📺';
+      case 'ad': return '�';
       case 'writing': return '✍️';
       case 'social': return '📱';
       default: return '⭐';
@@ -649,7 +678,8 @@ const Dashboard = ({ user, onLogout }) => {
   const fetchTasks = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/tasks/available`, {
+      // Corrected endpoint from /api/tasks/available to /api/tasks as per backend
+      const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/tasks`, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -913,12 +943,28 @@ const App = () => {
     setTheme(newTheme);
     if (user) {
       const token = localStorage.getItem('token');
-      fetch(`${process.env.REACT_APP_BACKEND_URL}/api/settings/theme?theme=${newTheme}`, {
+      // Corrected endpoint for theme update to /api/user/profile (PUT)
+      // Sending as JSON body as per FastAPI PUT endpoint for profile updates
+      fetch(`${process.env.REACT_APP_BACKEND_URL}/api/user/profile`, {
         method: 'PUT',
         headers: {
+          'Content-Type': 'application/json', // Ensure Content-Type is JSON
           'Authorization': `Bearer ${token}`,
         },
-      });
+        body: JSON.stringify({ theme: newTheme }), // Send theme as JSON body
+      })
+      .then(response => {
+        if (!response.ok) {
+          console.error('Failed to update theme on backend:', response.statusText);
+        } else {
+          // Optionally update local user state with new theme
+          response.json().then(updatedUser => {
+            localStorage.setItem('user', JSON.stringify(updatedUser));
+            setUser(updatedUser);
+          });
+        }
+      })
+      .catch(error => console.error('Network error updating theme:', error));
     }
   };
 
