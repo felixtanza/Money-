@@ -1081,7 +1081,7 @@ const AdminDashboard = ({ user, onLogout }) => {
             💸 Transactions
           </button>
           <button
-            className={`nav-item ${adminPage === 'submissions' ? 'active' : ''}`} {/* New Submissions tab */}
+            className={`nav-item ${adminPage === 'submissions' ? 'active' : ''}`} // New Submissions tab 
             onClick={() => setAdminPage('submissions')}
           >
             📝 Submissions
