@@ -50,7 +50,7 @@ const AuthPage = ({ onLogin }) => {
   useEffect(() => {
     if (!isLogin) {
       const urlParams = new URLSearchParams(window.location.search);
-      const referralFromUrl = urlParams.get('ref');
+      const referralFromUrl = url.get('ref');
       if (referralFromUrl) {
         setFormData((prev) => ({
           ...prev,
@@ -747,6 +747,7 @@ const AdminDashboard = ({ user, onLogout }) => {
   };
 
   const handleUpdateUserRole = async (userId, newRole) => {
+    // IMPORTANT: Replace window.confirm with a custom modal for production
     if (!window.confirm(`Are you sure you want to change role for user ${userId} to ${newRole}?`)) {
       return;
     }
@@ -1100,7 +1101,7 @@ const AdminDashboard = ({ user, onLogout }) => {
 };
 
 
-// Main Dashboard Component (unchanged, copy from your previous code)
+// Main Dashboard Component
 const Dashboard = ({ user, onLogout }) => {
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [dashboardData, setDashboardData] = useState(null);
@@ -1108,13 +1109,16 @@ const Dashboard = ({ user, onLogout }) => {
   const [loading, setLoading] = useState(true);
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
-  const { theme, toggleTheme, showNotification } = useAppContext();
+  const { theme, toggleTheme, showNotification } = useAppContext(); // Destructure showNotification
 
   useEffect(() => {
     fetchDashboardData();
     fetchTasks();
+    fetchUserNotifications(); // <--- ADDED: Fetch notifications on dashboard load
+    const notificationInterval = setInterval(fetchUserNotifications, 60000); // <--- ADDED: Poll every 60 seconds
+    return () => clearInterval(notificationInterval); // Cleanup interval on unmount
     // eslint-disable-next-line
-  }, []);
+  }, [user]); // Re-fetch when user object changes (e.g., after login)
 
   const fetchDashboardData = async () => {
     try {
@@ -1138,7 +1142,6 @@ const Dashboard = ({ user, onLogout }) => {
   const fetchTasks = async () => {
     try {
       const token = localStorage.getItem('token');
-      // Corrected endpoint from /api/tasks/available to /api/tasks as per backend
       const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/tasks`, {
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -1150,6 +1153,53 @@ const Dashboard = ({ user, onLogout }) => {
       }
     } catch (error) {
       console.error('Error fetching tasks:', error);
+    }
+  };
+
+  const fetchUserNotifications = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return; // Don't fetch if not logged in
+
+      const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/notifications`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+      const data = await response.json();
+      if (response.ok && data.success && Array.isArray(data.notifications)) {
+        // Filter for unread notifications and display them
+        data.notifications.forEach(notif => {
+          // You might want a more sophisticated way to track 'read' status
+          // For now, we'll just show them if they are 'unread' (or always show new ones)
+          if (!notif.read) { // Assuming a 'read' field in your notification schema
+            showNotification({
+              title: notif.title,
+              message: notif.message,
+              type: notif.type || 'info' // Use type from backend or default to 'info'
+            });
+            // Optionally, mark as read on the backend after displaying
+            markNotificationAsRead(notif.notification_id);
+          }
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching user notifications:', error);
+    }
+  };
+
+  const markNotificationAsRead = async (notificationId) => {
+    try {
+      const token = localStorage.getItem('token');
+      await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/notifications/${notificationId}/read`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+      // No need to show a notification for marking as read, just update backend
+    } catch (error) {
+      console.error('Error marking notification as read:', error);
     }
   };
 
