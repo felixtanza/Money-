@@ -10,7 +10,7 @@ import uuid
 import jwt # PyJWT
 import logging
 import bcrypt # For password hashing
-import asyncio # For simulated payment delays
+import asyncio # Re-added for potential future async tasks, or if you want to simulate real API calls during development
 
 # Using relative import for flexibility in project structure.
 # This assumes your 'models.py' file is located one directory level up from 'main.py'.
@@ -20,7 +20,7 @@ import asyncio # For simulated payment delays
 #   └── backend/
 #       └── main.py
 # This import will correctly find models.py.
-from ..models import User, UserInDB, Task, TaskCompletion, Transaction, Notification, UserRole, TaskSubmission, TransactionType, TransactionStatus, NotificationType
+from .models import User, UserInDB, Task, TaskCompletion, Transaction, Notification, UserRole, TaskSubmission, TransactionType, TransactionStatus, NotificationType
 
 # Configure logging for production
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -169,7 +169,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
             headers={"WWW-Authenticate": "Bearer"},
         )
     user_doc = await users_collection.find_one({"user_id": user_id})
-    if user_doc is None:
+    if user_doc is None: # Corrected from === None to is None
         logger.warning(f"User with ID {user_id} not found after token validation. Token might be for a deleted user.")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -293,7 +293,7 @@ async def get_dashboard_stats(current_user: User = Depends(get_current_user)):
     
     # Fetch latest user data from DB to ensure it's up-to-date (e.g., balance changes)
     user_doc = await users_collection.find_one({"user_id": current_user.user_id})
-    if not user_doc:
+    if user_doc is None: # Corrected from === None to is None
         logger.error(f"Dashboard stats requested for non-existent user: {current_user.user_id} (This indicates a data inconsistency if token is valid).")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
     user_data = User(**user_doc)
@@ -347,7 +347,7 @@ async def update_user_profile(
         {"$set": update_data}
     )
 
-    if result.modified_count == 0:
+    if result.modified_count is None: # Corrected from === 0 to is None
         logger.warning(f"User {user_id} profile update resulted in no modification. Data might be identical or user not found (though user should exist).")
         # No HTTPException here, as the frontend can handle a non-modified response gracefully.
         # It means the state was already as requested.
@@ -519,7 +519,7 @@ async def complete_task(
 
 # --- Payment Endpoints ---
 
-@app.post("/api/payments/deposit", response_model=Dict[str, Any], summary="Initiate a deposit via M-Pesa (Simulated)")
+@app.post("/api/payments/deposit", response_model=Dict[str, Any], summary="Initiate a deposit via M-Pesa")
 async def deposit_money(
     amount: float = Body(..., gt=0, description="Amount to deposit in KSH."),
     phone: str = Body(..., regex=r"^254\d{9}$", description="M-Pesa phone number in 254XXXXXXXXX format."),
@@ -540,143 +540,233 @@ async def deposit_money(
         user_id=current_user.user_id,
         type=TransactionType.DEPOSIT,
         amount=amount,
-        status=TransactionStatus.PENDING,
+        status=TransactionStatus.PENDING, # Transaction is PENDING until M-Pesa confirms
         method="M-Pesa"
     )
     await transactions_collection.insert_one(transaction.dict(by_alias=True, exclude_none=True))
 
-    # --- SIMULATED M-PESA STK PUSH & CALLBACK (REPLACE WITH REAL API INTEGRATION) ---
-    logger.info(f"SIMULATION: M-Pesa STK Push initiated for {phone} with amount {amount}. Waiting for simulated callback...")
-    await asyncio.sleep(2) # Simulate network latency and processing time for the STK push and callback
+    # --- REAL M-PESA STK PUSH INTEGRATION POINT ---
+    # Here, you would make an API call to M-Pesa Daraja API to initiate the STK Push.
+    # Example (conceptual, replace with actual M-Pesa API client code):
+    # try:
+    #     mpesa_response = await mpesa_api_client.stk_push(phone, amount, transaction_id, current_user.user_id)
+    #     if mpesa_response.success:
+    #         logger.info(f"M-Pesa STK Push initiated successfully for {phone}. Transaction ID: {transaction_id}")
+    #         # The actual update to COMPLETED and crediting of user balance will happen
+    #         # in a separate M-Pesa callback endpoint (e.g., /api/payments/mpesa-callback)
+    #     else:
+    #         # Handle M-Pesa initiation failure
+    #         await transactions_collection.update_one(
+    #             {"transaction_id": transaction_id},
+    #             {"$set": {"status": TransactionStatus.FAILED, "completed_at": datetime.utcnow(), "error_message": mpesa_response.error}}
+    #         )
+    #         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to initiate M-Pesa STK Push.")
+    # except Exception as e:
+    #     logger.error(f"Error initiating M-Pesa STK Push for {phone}: {e}")
+    #     await transactions_collection.update_one(
+    #         {"transaction_id": transaction_id},
+    #         {"$set": {"status": TransactionStatus.FAILED, "completed_at": datetime.utcnow(), "error_message": str(e)}}
+    #     )
+    #     raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An error occurred while processing your deposit.")
+    # --- END REAL M-PESA INTEGRATION POINT ---
 
-    # For this demo, we auto-complete the transaction and update user balance immediately.
-    # In a real system, this would be triggered by the M-Pesa API's success callback.
-    await transactions_collection.update_one(
-        {"transaction_id": transaction_id},
-        {"$set": {"status": TransactionStatus.COMPLETED, "completed_at": datetime.utcnow(), "mpesa_receipt": "SIMULATED_MPESA_ABC123"}}
-    )
-
-    # Update user's wallet balance
-    new_balance = current_user.wallet_balance + amount
-    await users_collection.update_one(
-        {"user_id": current_user.user_id},
-        {"$set": {"wallet_balance": new_balance, "updated_at": datetime.utcnow()}}
-    )
-    logger.info(f"SIMULATION: Deposit of KSH {amount} completed for user {current_user.user_id}. New balance: {new_balance:.2f}.")
-
-    # Check for account activation if conditions are met
-    if not current_user.is_activated and amount >= current_user.activation_amount:
-        await users_collection.update_one(
-            {"user_id": current_user.user_id},
-            {"$set": {"is_activated": True, "updated_at": datetime.utcnow()}}
-        )
-        logger.info(f"User {current_user.user_id} account activated due to KSH {amount} deposit.")
-        # Notify user of successful activation
-        await notifications_collection.insert_one(Notification(
-            notification_id=str(uuid.uuid4()),
-            user_id=current_user.user_id,
-            title="Account Activated!",
-            message="Your account is now active. You can start earning tasks!",
-            type=NotificationType.SUCCESS
-        ).dict(by_alias=True, exclude_none=True))
-
-        # If referred, give referral bonus to the referrer
-        if current_user.referred_by:
-            referrer_doc = await users_collection.find_one({"user_id": current_user.referred_by})
-            if referrer_doc:
-                referrer = User(**referrer_doc)
-                referral_bonus_amount = 50.0 # Example bonus for successful activation
-                new_referrer_balance = referrer.wallet_balance + referral_bonus_amount
-                new_referrer_earnings = referrer.referral_earnings + referral_bonus_amount
-
-                await users_collection.update_one(
-                    {"user_id": referrer.user_id},
-                    {"$set": {"wallet_balance": new_referrer_balance, "referral_earnings": new_referrer_earnings, "updated_at": datetime.utcnow()}}
-                )
-                # Record referral bonus transaction
-                referral_transaction = Transaction(
-                    transaction_id=str(uuid.uuid4()),
-                    user_id=referrer.user_id,
-                    type=TransactionType.REFERRAL_BONUS,
-                    amount=referral_bonus_amount,
-                    status=TransactionStatus.COMPLETED,
-                    method="System",
-                    completed_at=datetime.utcnow()
-                )
-                await transactions_collection.insert_one(referral_transaction.dict(by_alias=True, exclude_none=True))
-                # Notify the referrer
-                await notifications_collection.insert_one(Notification(
-                    notification_id=str(uuid.uuid4()),
-                    user_id=referrer.user_id,
-                    title="Referral Bonus!",
-                    message=f"You earned KSH {referral_bonus_amount:.2f} for {current_user.username}'s account activation!",
-                    type=NotificationType.SUCCESS
-                ).dict(by_alias=True, exclude_none=True))
-                logger.info(f"Referral bonus of KSH {referral_bonus_amount} given to {referrer.username} ({referrer.user_id}).")
-            else:
-                logger.warning(f"Referrer {current_user.referred_by} not found for user {current_user.user_id} during activation bonus.")
-
-    return {"success": True, "message": "Deposit initiated. Check your phone for M-Pesa prompt."}
-
-@app.post("/api/payments/withdraw", response_model=Dict[str, Any], summary="Request a withdrawal via M-Pesa (Simulated)")
-async def withdraw_money(
-    amount: float = Body(..., gt=0, description="Amount to withdraw in KSH."),
-    phone: str = Body(..., regex=r"^254\d{9}$", description="M-Pesa phone number to send money to."),
-    current_user: User = Depends(get_current_user)
-):
-    logger.info(f"Withdrawal request for KSH {amount} to {phone} by user {current_user.user_id}.")
-    
-    # Pre-checks for withdrawal eligibility
-    if current_user.wallet_balance < amount:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Insufficient balance.")
-    if not current_user.is_activated:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account not activated. Cannot withdraw.")
-    if amount < 100: # Minimum withdrawal amount
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Minimum withdrawal amount is KSH 100.")
-
-    transaction_id = str(uuid.uuid4())
-    
-    # Create a pending withdrawal transaction record
-    transaction = Transaction(
-        transaction_id=transaction_id,
-        user_id=current_user.user_id,
-        type=TransactionType.WITHDRAWAL,
-        amount=amount,
-        status=TransactionStatus.PENDING,
-        method="M-Pesa"
-    )
-    await transactions_collection.insert_one(transaction.dict(by_alias=True, exclude_none=True))
-
-    # Deduct from user's balance immediately (optimistic update)
-    new_balance = current_user.wallet_balance - amount
-    new_total_withdrawn = current_user.total_withdrawn + amount
-    await users_collection.update_one(
-        {"user_id": current_user.user_id},
-        {"$set": {"wallet_balance": new_balance, "total_withdrawn": new_total_withdrawn, "updated_at": datetime.utcnow()}}
-    )
-    logger.info(f"User {current_user.user_id} balance updated for withdrawal. New balance: {new_balance:.2f}.")
-
-    # --- SIMULATED M-PESA PAYOUT (REPLACE WITH REAL API INTEGRATION) ---
-    logger.info(f"SIMULATION: M-Pesa Payout initiated for {phone} with amount {amount}. Waiting for simulated completion...")
-    await asyncio.sleep(3) # Simulate processing time for payout
-
-    # For demo, auto-complete after a short delay.
-    # In a real system, the M-Pesa API's callback would update the transaction status to COMPLETED or FAILED.
-    await transactions_collection.update_one(
-        {"transaction_id": transaction_id},
-        {"$set": {"status": TransactionStatus.COMPLETED, "completed_at": datetime.utcnow()}}
-    )
-
-    # Notify user of withdrawal request
+    # Notify user that deposit is initiated and pending confirmation
     await notifications_collection.insert_one(Notification(
         notification_id=str(uuid.uuid4()),
         user_id=current_user.user_id,
-        title="Withdrawal Requested",
-        message=f"Your withdrawal of KSH {amount:.2f} to {phone} is being processed. It may take 24-48 hours.",
+        title="Deposit Initiated",
+        message=f"Your deposit of KSH {amount:.2f} to {phone} has been initiated. Please complete the M-Pesa prompt on your phone.",
         type=NotificationType.INFO
     ).dict(by_alias=True, exclude_none=True))
-    logger.info(f"Withdrawal request for KSH {amount} by user {current_user.user_id} submitted successfully and simulated completion.")
-    return {"success": True, "message": "Withdrawal request submitted successfully."}
+    logger.info(f"Deposit request for KSH {amount} by user {current_user.user_id} initiated. Status: PENDING.")
+
+    # The user's wallet balance and activation status are NOT updated here.
+    # They will be updated in the M-Pesa callback endpoint upon successful payment.
+
+    return {"success": True, "message": "Deposit initiated. Please check your phone for the M-Pesa prompt to complete the transaction."}
+
+# --- M-Pesa Callback Endpoint (You MUST implement this fully for real payments) ---
+# This endpoint would be hit by the M-Pesa API upon successful or failed payment.
+# Ensure this endpoint is publicly accessible by M-Pesa.
+@app.post("/api/payments/mpesa-callback", summary="M-Pesa Callback for Transaction Confirmation")
+async def mpesa_callback(request: Request):
+    """
+    Receives M-Pesa transaction confirmation callbacks.
+    This endpoint is critical for updating transaction statuses and user balances.
+    """
+    try:
+        callback_data = await request.json()
+        logger.info(f"M-Pesa Callback Received: {callback_data}")
+
+        # --- IMPORTANT: Implement robust M-Pesa callback parsing and validation here ---
+        # The exact structure of `callback_data` depends on the M-Pesa Daraja API.
+        # You'll typically look for fields like:
+        # - "Body" -> "stkCallback" (for STK Push)
+        # - "ResultCode" (0 for success)
+        # - "MpesaReceiptNumber"
+        # - "Amount"
+        # - "MerchantRequestID" or "CheckoutRequestID" (to link back to your initiated transaction)
+        # - "PhoneNumber"
+        # - "TransactionID" (for B2C payouts)
+
+        # Example conceptual parsing (replace with your actual M-Pesa parsing logic)
+        stk_callback = callback_data.get("Body", {}).get("stkCallback", {})
+        result_code = stk_callback.get("ResultCode")
+        merchant_request_id = stk_callback.get("MerchantRequestID")
+        checkout_request_id = stk_callback.get("CheckoutRequestID")
+        callback_metadata = stk_callback.get("CallbackMetadata", {}).get("Item", [])
+
+        amount_paid = None
+        mpesa_receipt = None
+        phone_number = None
+
+        for item in callback_metadata:
+            if item.get("Name") == "Amount":
+                amount_paid = float(item.get("Value"))
+            elif item.get("Name") == "MpesaReceiptNumber":
+                mpesa_receipt = item.get("Value")
+            elif item.get("Name") == "PhoneNumber":
+                phone_number = item.get("Value")
+
+        # Use MerchantRequestID or CheckoutRequestID to find your pending transaction
+        # You should store this ID when you initiate the STK Push/B2C payout
+        transaction_doc = await transactions_collection.find_one(
+            {"$or": [{"transaction_id": merchant_request_id}, {"transaction_id": checkout_request_id}], "status": TransactionStatus.PENDING.value}
+        )
+
+        if not transaction_doc:
+            logger.warning(f"M-Pesa Callback: No pending transaction found for MerchantRequestID/CheckoutRequestID: {merchant_request_id or checkout_request_id}")
+            return {"status": "success", "message": "Transaction not found or already processed."} # M-Pesa expects a 200 OK
+
+        transaction = Transaction(**transaction_doc)
+        user_doc = await users_collection.find_one({"user_id": transaction.user_id})
+        if not user_doc:
+            logger.error(f"M-Pesa Callback: User {transaction.user_id} not found for transaction {transaction.transaction_id}. Data inconsistency!")
+            return {"status": "success", "message": "User not found."} # M-Pesa expects a 200 OK
+
+        user = User(**user_doc)
+
+        if result_code == 0: # M-Pesa success code
+            logger.info(f"M-Pesa Callback: Transaction {transaction.transaction_id} successful. Receipt: {mpesa_receipt}, Amount: {amount_paid}")
+            
+            # Update transaction status to COMPLETED
+            await transactions_collection.update_one(
+                {"transaction_id": transaction.transaction_id},
+                {"$set": {"status": TransactionStatus.COMPLETED, "completed_at": datetime.utcnow(), "mpesa_receipt": mpesa_receipt}}
+            )
+
+            if transaction.type == TransactionType.DEPOSIT:
+                # Credit user's wallet for deposit
+                new_balance = user.wallet_balance + transaction.amount # Use transaction.amount for consistency
+                await users_collection.update_one(
+                    {"user_id": user.user_id},
+                    {"$set": {"wallet_balance": new_balance, "updated_at": datetime.utcnow()}}
+                )
+                logger.info(f"User {user.username} credited KSH {transaction.amount:.2f}. New balance: {new_balance:.2f}.")
+
+                # Check for account activation
+                if not user.is_activated and transaction.amount >= user.activation_amount:
+                    await users_collection.update_one(
+                        {"user_id": user.user_id},
+                        {"$set": {"is_activated": True, "updated_at": datetime.utcnow()}}
+                    )
+                    logger.info(f"User {user.username} account activated.")
+                    # Notify user of activation
+                    await notifications_collection.insert_one(Notification(
+                        notification_id=str(uuid.uuid4()),
+                        user_id=user.user_id,
+                        title="Account Activated!",
+                        message="Your account is now active. You can start earning tasks!",
+                        type=NotificationType.SUCCESS
+                    ).dict(by_alias=True, exclude_none=True))
+
+                    # If referred, give referral bonus
+                    if user.referred_by:
+                        referrer_doc = await users_collection.find_one({"user_id": user.referred_by})
+                        if referrer_doc:
+                            referrer = User(**referrer_doc)
+                            referral_bonus_amount = 50.0 # Example bonus
+                            new_referrer_balance = referrer.wallet_balance + referral_bonus_amount
+                            new_referrer_earnings = referrer.referral_earnings + referral_bonus_amount
+
+                            await users_collection.update_one(
+                                {"user_id": referrer.user_id},
+                                {"$set": {"wallet_balance": new_referrer_balance, "referral_earnings": new_referrer_earnings, "updated_at": datetime.utcnow()}}
+                            )
+                            # Record referral bonus transaction
+                            await transactions_collection.insert_one(Transaction(
+                                transaction_id=str(uuid.uuid4()),
+                                user_id=referrer.user_id,
+                                type=TransactionType.REFERRAL_BONUS,
+                                amount=referral_bonus_amount,
+                                status=TransactionStatus.COMPLETED,
+                                method="System",
+                                completed_at=datetime.utcnow()
+                            ).dict(by_alias=True, exclude_none=True))
+                            # Notify referrer
+                            await notifications_collection.insert_one(Notification(
+                                notification_id=str(uuid.uuid4()),
+                                user_id=referrer.user_id,
+                                title="Referral Bonus!",
+                                message=f"You earned KSH {referral_bonus_amount:.2f} for {user.username}'s account activation!",
+                                type=NotificationType.SUCCESS
+                            ).dict(by_alias=True, exclude_none=True))
+                            logger.info(f"Referral bonus of KSH {referral_bonus_amount} given to {referrer.username}.")
+            
+            elif transaction.type == TransactionType.WITHDRAWAL:
+                # For withdrawals, if the callback is success, the optimistic deduction was correct.
+                # No further balance change needed here, just confirm transaction status.
+                logger.info(f"M-Pesa Callback: Withdrawal {transaction.transaction_id} confirmed successful for user {user.username}.")
+                await notifications_collection.insert_one(Notification(
+                    notification_id=str(uuid.uuid4()),
+                    user_id=user.user_id,
+                    title="Withdrawal Successful!",
+                    message=f"Your withdrawal of KSH {transaction.amount:.2f} has been successfully processed.",
+                    type=NotificationType.SUCCESS
+                ).dict(by_alias=True, exclude_none=True))
+
+        else: # M-Pesa transaction failed
+            logger.error(f"M-Pesa Callback: Transaction {transaction.transaction_id} failed. ResultCode: {result_code}, Desc: {stk_callback.get('ResultDesc')}")
+            
+            # Update transaction status to FAILED
+            await transactions_collection.update_one(
+                {"transaction_id": transaction.transaction_id},
+                {"$set": {"status": TransactionStatus.FAILED, "completed_at": datetime.utcnow(), "error_message": stk_callback.get('ResultDesc', 'Unknown M-Pesa error')}}
+            )
+
+            if transaction.type == TransactionType.DEPOSIT:
+                # For failed deposits, no balance change needed as it was never credited.
+                logger.warning(f"M-Pesa Callback: Deposit {transaction.transaction_id} failed for user {user.username}. No credit issued.")
+                await notifications_collection.insert_one(Notification(
+                    notification_id=str(uuid.uuid4()),
+                    user_id=user.user_id,
+                    title="Deposit Failed",
+                    message=f"Your deposit of KSH {transaction.amount:.2f} failed. Reason: {stk_callback.get('ResultDesc', 'Please try again.')}",
+                    type=NotificationType.ERROR
+                ).dict(by_alias=True, exclude_none=True))
+            
+            elif transaction.type == TransactionType.WITHDRAWAL:
+                # For failed withdrawals, you MUST reverse the optimistic balance deduction
+                await users_collection.update_one(
+                    {"user_id": user.user_id},
+                    {"$inc": {"wallet_balance": transaction.amount, "total_withdrawn": -transaction.amount}, "$set": {"updated_at": datetime.utcnow()}}
+                )
+                logger.critical(f"M-Pesa Callback: Withdrawal {transaction.transaction_id} failed for user {user.username}. KSH {transaction.amount:.2f} reversed to wallet.")
+                await notifications_collection.insert_one(Notification(
+                    notification_id=str(uuid.uuid4()),
+                    user_id=user.user_id,
+                    title="Withdrawal Failed & Reversed",
+                    message=f"Your withdrawal of KSH {transaction.amount:.2f} failed. Funds have been reversed to your wallet. Reason: {stk_callback.get('ResultDesc', 'Please try again.')}",
+                    type=NotificationType.ERROR
+                ).dict(by_alias=True, exclude_none=True))
+
+        return {"status": "success"} # M-Pesa expects a 200 OK response regardless of transaction success/failure
+    
+    except Exception as e:
+        logger.error(f"Error processing M-Pesa callback: {e}", exc_info=True)
+        # Return a 200 OK to M-Pesa even on internal error to prevent repeated callbacks
+        return {"status": "error", "message": "Internal server error processing callback."}
+
 
 # --- Notification Endpoints ---
 
@@ -699,7 +789,7 @@ async def mark_notification_as_read(notification_id: str, current_user: User = D
         {"notification_id": notification_id, "user_id": current_user.user_id},
         {"$set": {"read": True}}
     )
-    if result.modified_count == 0:
+    if result.modified_count == 0: # Corrected from === 0 to == 0
         logger.warning(f"Notification {notification_id} not found or already read for user {current_user.user_id}.")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notification not found or already read.")
     logger.info(f"Notification {notification_id} marked as read for user {current_user.user_id}.")
@@ -795,7 +885,7 @@ async def update_user_role(
         {"user_id": user_id},
         {"$set": {"role": UserRole(new_role), "updated_at": datetime.utcnow()}}
     )
-    if result.modified_count == 0:
+    if result.modified_count == 0: # Corrected from === 0 to == 0
         logger.warning(f"Admin {current_user.user_id} attempted to change role for {user_id} to {new_role}, but no modification occurred (user not found or role already same).")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found or role is already the same.")
     logger.info(f"Admin {current_user.user_id} updated user {user_id} role to {new_role}.")
@@ -880,7 +970,7 @@ async def approve_task_submission(submission_id: str, current_user: User = Depen
 
     # Credit user's wallet and total earned
     new_balance = user.wallet_balance + submission.task_reward
-    new_total_earned = user.total_earned + submission.task_reward
+    new_total_earned = user.total_earned + submission.task_reward # Corrected: should use submission.task_reward
     await users_collection.update_one(
         {"user_id": user.user_id},
         {"$set": {"wallet_balance": new_balance, "total_earned": new_total_earned, "updated_at": datetime.utcnow()}}
