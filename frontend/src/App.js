@@ -36,7 +36,7 @@ const AuthPage = ({ onLogin }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [formData, setFormData] = useState({
     email: '',
-    username: '', // <--- ADDED: Username field
+    username: '',
     password: '',
     full_name: '',
     phone: '',
@@ -674,6 +674,432 @@ const WithdrawModal = ({ isOpen, onClose, user, onWithdraw }) => {
   );
 };
 
+// Admin Components
+const AdminDashboard = ({ user, onLogout }) => {
+  const [adminPage, setAdminPage] = useState('users');
+  const [users, setUsers] = useState([]);
+  const [transactions, setTransactions] = useState([]);
+  const [tasks, setTasks] = useState([]); // For managing all tasks
+  const [loading, setLoading] = useState(true);
+  const { showNotification } = useAppContext();
+
+  // State for new task form
+  const [newTask, setNewTask] = useState({
+    title: '',
+    description: '',
+    reward: 0,
+    type: 'survey',
+    requirements: {},
+    auto_approve: true
+  });
+  // State for broadcast notification
+  const [broadcastNotification, setBroadcastNotification] = useState({
+    title: '',
+    message: ''
+  });
+
+  useEffect(() => {
+    fetchAdminData();
+    // eslint-disable-next-line
+  }, [adminPage]); // Refetch data when admin page changes
+
+  const fetchAdminData = async () => {
+    setLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const headers = { 'Authorization': `Bearer ${token}` };
+
+      let data;
+      if (adminPage === 'users') {
+        const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/admin/users`, { headers });
+        data = await response.json();
+        if (response.ok && Array.isArray(data)) { // Ensure data is an array
+          setUsers(data);
+        } else {
+          showNotification({ title: 'Error', message: data.detail || 'Failed to fetch users', type: 'error' });
+          setUsers([]);
+        }
+      } else if (adminPage === 'transactions') {
+        const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/admin/transactions`, { headers });
+        data = await response.json();
+        if (response.ok && data.success && Array.isArray(data.transactions)) {
+          setTransactions(data.transactions);
+        } else {
+          showNotification({ title: 'Error', message: data.detail || 'Failed to fetch transactions', type: 'error' });
+          setTransactions([]);
+        }
+      } else if (adminPage === 'tasks') {
+        const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/tasks`, { headers }); // Reusing /api/tasks for admin to view all
+        data = await response.json();
+        if (response.ok && data.success && Array.isArray(data.tasks)) {
+          setTasks(data.tasks);
+        } else {
+          showNotification({ title: 'Error', message: data.detail || 'Failed to fetch tasks', type: 'error' });
+          setTasks([]);
+        }
+      }
+    } catch (error) {
+      showNotification({ title: 'Error', message: 'Network error fetching admin data.', type: 'error' });
+      console.error('Error fetching admin data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUpdateUserRole = async (userId, newRole) => {
+    if (!window.confirm(`Are you sure you want to change role for user ${userId} to ${newRole}?`)) {
+      return;
+    }
+    setLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/admin/users/${userId}/role`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ new_role: newRole }), // Send as JSON body
+      });
+      const data = await response.json();
+      if (response.ok) {
+        showNotification({ title: 'Success', message: `User ${userId} role updated to ${newRole}`, type: 'success' });
+        fetchAdminData(); // Refresh user list
+      } else {
+        showNotification({ title: 'Error', message: data.detail || 'Failed to update user role', type: 'error' });
+      }
+    } catch (error) {
+      showNotification({ title: 'Error', message: 'Network error updating user role.', type: 'error' });
+      console.error('Error updating user role:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreateTask = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/tasks`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(newTask),
+      });
+      const data = await response.json();
+      if (response.ok) {
+        showNotification({ title: 'Success', message: 'Task created successfully!', type: 'success' });
+        setNewTask({ title: '', description: '', reward: 0, type: 'survey', requirements: {}, auto_approve: true }); // Reset form
+        fetchAdminData(); // Refresh tasks list
+      } else {
+        showNotification({ title: 'Error', message: data.detail || 'Failed to create task', type: 'error' });
+      }
+    } catch (error) {
+      showNotification({ title: 'Error', message: 'Network error creating task.', type: 'error' });
+      console.error('Error creating task:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleBroadcastNotification = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/api/admin/notifications/broadcast`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(broadcastNotification),
+      });
+      const data = await response.json();
+      if (response.ok) {
+        showNotification({ title: 'Success', message: 'Notification broadcasted!', type: 'success' });
+        setBroadcastNotification({ title: '', message: '' }); // Reset form
+      } else {
+        showNotification({ title: 'Error', message: data.detail || 'Failed to broadcast notification', type: 'error' });
+      }
+    } catch (error) {
+      showNotification({ title: 'Error', message: 'Network error broadcasting notification.', type: 'error' });
+      console.error('Error broadcasting notification:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="dashboard admin-dashboard">
+      <header className="dashboard-header">
+        <div className="header-content">
+          <h1>Admin Panel</h1>
+          <div className="header-actions">
+            <button className="btn-logout" onClick={onLogout}>
+              Logout
+            </button>
+          </div>
+        </div>
+        <nav className="dashboard-nav">
+          <button
+            className={`nav-item ${adminPage === 'users' ? 'active' : ''}`}
+            onClick={() => setAdminPage('users')}
+          >
+            👥 Users
+          </button>
+          <button
+            className={`nav-item ${adminPage === 'tasks' ? 'active' : ''}`}
+            onClick={() => setAdminPage('tasks')}
+          >
+            ⭐ Tasks
+          </button>
+          <button
+            className={`nav-item ${adminPage === 'transactions' ? 'active' : ''}`}
+            onClick={() => setAdminPage('transactions')}
+          >
+            💸 Transactions
+          </button>
+          <button
+            className={`nav-item ${adminPage === 'notifications' ? 'active' : ''}`}
+            onClick={() => setAdminPage('notifications')}
+          >
+            🔔 Notifications
+          </button>
+        </nav>
+      </header>
+
+      <main className="dashboard-main">
+        {loading ? (
+          <div className="loading-container">
+            <div className="loading-spinner"></div>
+            <p>Loading admin data...</p>
+          </div>
+        ) : (
+          <>
+            {adminPage === 'users' && (
+              <div className="admin-section animated-card">
+                <h2>User Management</h2>
+                <div className="table-container">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>User ID</th>
+                        <th>Username</th>
+                        <th>Email</th>
+                        <th>Phone</th>
+                        <th>Role</th>
+                        <th>Activated</th>
+                        <th>Balance</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {users.map(u => (
+                        <tr key={u.user_id}>
+                          <td>{u.user_id.substring(0, 8)}...</td>
+                          <td>{u.username}</td>
+                          <td>{u.email}</td>
+                          <td>{u.phone}</td>
+                          <td>{u.role}</td>
+                          <td>{u.is_activated ? 'Yes' : 'No'}</td>
+                          <td>{u.wallet_balance.toFixed(2)}</td>
+                          <td>
+                            <select
+                              value={u.role}
+                              onChange={(e) => handleUpdateUserRole(u.user_id, e.target.value)}
+                              className="form-select"
+                            >
+                              <option value="user">User</option>
+                              <option value="admin">Admin</option>
+                            </select>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {users.length === 0 && <p className="no-data-message">No users found.</p>}
+              </div>
+            )}
+
+            {adminPage === 'tasks' && (
+              <div className="admin-section animated-card">
+                <h2>Task Management</h2>
+                <div className="form-section">
+                  <h3>Create New Task</h3>
+                  <form onSubmit={handleCreateTask} className="admin-form">
+                    <div className="form-group">
+                      <input
+                        type="text"
+                        placeholder="Task Title"
+                        value={newTask.title}
+                        onChange={(e) => setNewTask({ ...newTask, title: e.target.value })}
+                        required
+                        className="form-input"
+                      />
+                    </div>
+                    <div className="form-group">
+                      <textarea
+                        placeholder="Task Description"
+                        value={newTask.description}
+                        onChange={(e) => setNewTask({ ...newTask, description: e.target.value })}
+                        required
+                        className="form-input"
+                      ></textarea>
+                    </div>
+                    <div className="form-group">
+                      <input
+                        type="number"
+                        placeholder="Reward Amount (KSH)"
+                        value={newTask.reward}
+                        onChange={(e) => setNewTask({ ...newTask, reward: parseFloat(e.target.value) || 0 })}
+                        min="0"
+                        step="0.01"
+                        required
+                        className="form-input"
+                      />
+                    </div>
+                    <div className="form-group">
+                      <select
+                        value={newTask.type}
+                        onChange={(e) => setNewTask({ ...newTask, type: e.target.value })}
+                        className="form-select"
+                      >
+                        <option value="survey">Survey</option>
+                        <option value="ad">Ad View</option>
+                        <option value="writing">Writing</option>
+                        <option value="social">Social Media</option>
+                        <option value="referral">Referral</option>
+                      </select>
+                    </div>
+                    <div className="form-group checkbox-group">
+                      <input
+                        type="checkbox"
+                        id="autoApprove"
+                        checked={newTask.auto_approve}
+                        onChange={(e) => setNewTask({ ...newTask, auto_approve: e.target.checked })}
+                      />
+                      <label htmlFor="autoApprove">Auto Approve (Reward Instantly)</label>
+                    </div>
+                    <button type="submit" className="btn-primary" disabled={loading}>
+                      Create Task
+                    </button>
+                  </form>
+                </div>
+
+                <h3>All Existing Tasks</h3>
+                <div className="table-container">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Title</th>
+                        <th>Type</th>
+                        <th>Reward</th>
+                        <th>Auto Approve</th>
+                        <th>Created At</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tasks.map(t => (
+                        <tr key={t.task_id}>
+                          <td>{t.title}</td>
+                          <td>{t.type}</td>
+                          <td>{t.reward.toFixed(2)}</td>
+                          <td>{t.auto_approve ? 'Yes' : 'No'}</td>
+                          <td>{new Date(t.created_at).toLocaleDateString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {tasks.length === 0 && <p className="no-data-message">No tasks found.</p>}
+              </div>
+            )}
+
+            {adminPage === 'transactions' && (
+              <div className="admin-section animated-card">
+                <h2>Transaction History</h2>
+                <div className="table-container">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Txn ID</th>
+                        <th>User ID</th>
+                        <th>Type</th>
+                        <th>Amount</th>
+                        <th>Status</th>
+                        <th>Method</th>
+                        <th>Created At</th>
+                        <th>Completed At</th>
+                        <th>M-Pesa Receipt</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {transactions.map(t => (
+                        <tr key={t.transaction_id}>
+                          <td>{t.transaction_id.substring(0, 8)}...</td>
+                          <td>{t.user_id.substring(0, 8)}...</td>
+                          <td>{t.type}</td>
+                          <td>{t.amount.toFixed(2)}</td>
+                          <td>{t.status}</td>
+                          <td>{t.method}</td>
+                          <td>{new Date(t.created_at).toLocaleDateString()}</td>
+                          <td>{t.completed_at ? new Date(t.completed_at).toLocaleDateString() : 'N/A'}</td>
+                          <td>{t.mpesa_receipt || 'N/A'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {transactions.length === 0 && <p className="no-data-message">No transactions found.</p>}
+              </div>
+            )}
+
+            {adminPage === 'notifications' && (
+              <div className="admin-section animated-card">
+                <h2>Broadcast Notifications</h2>
+                <div className="form-section">
+                  <h3>Send New Broadcast</h3>
+                  <form onSubmit={handleBroadcastNotification} className="admin-form">
+                    <div className="form-group">
+                      <input
+                        type="text"
+                        placeholder="Notification Title"
+                        value={broadcastNotification.title}
+                        onChange={(e) => setBroadcastNotification({ ...broadcastNotification, title: e.target.value })}
+                        required
+                        className="form-input"
+                      />
+                    </div>
+                    <div className="form-group">
+                      <textarea
+                        placeholder="Notification Message"
+                        value={broadcastNotification.message}
+                        onChange={(e) => setBroadcastNotification({ ...broadcastNotification, message: e.target.value })}
+                        required
+                        className="form-input"
+                      ></textarea>
+                    </div>
+                    <button type="submit" className="btn-primary" disabled={loading}>
+                      Broadcast Notification
+                    </button>
+                  </form>
+                </div>
+                <p className="info-message">Notifications sent from here will be visible to all users.</p>
+              </div>
+            )}
+          </>
+        )}
+      </main>
+    </div>
+  );
+};
+
+
 // Main Dashboard Component (unchanged, copy from your previous code)
 const Dashboard = ({ user, onLogout }) => {
   const [currentPage, setCurrentPage] = useState('dashboard');
@@ -818,6 +1244,14 @@ const Dashboard = ({ user, onLogout }) => {
           >
             👥 Referrals
           </button>
+          {user.role === 'admin' && ( // Admin tab for regular dashboard nav
+            <button
+              className={`nav-item ${currentPage === 'admin' ? 'active' : ''}`}
+              onClick={() => setCurrentPage('admin')}
+            >
+              ⚙️ Admin
+            </button>
+          )}
         </nav>
       </header>
       <main className="dashboard-main">
@@ -925,6 +1359,9 @@ const Dashboard = ({ user, onLogout }) => {
             </div>
           </div>
         )}
+        {currentPage === 'admin' && user.role === 'admin' && (
+          <AdminDashboard user={user} onLogout={onLogout} />
+        )}
       </main>
       <DepositModal
         isOpen={showDepositModal}
@@ -953,7 +1390,9 @@ const App = () => {
     const token = localStorage.getItem('token');
     const savedUser = localStorage.getItem('user');
     if (token && savedUser) {
-      setUser(JSON.parse(savedUser));
+      const parsedUser = JSON.parse(savedUser);
+      setUser(parsedUser);
+      setTheme(parsedUser.theme || 'light'); // Set theme from user data
     }
     const urlParams = new URLSearchParams(window.location.search);
     const refCode = urlParams.get('ref');
