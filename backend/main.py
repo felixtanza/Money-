@@ -20,7 +20,7 @@ import asyncio # Re-added for potential future async tasks, or if you want to si
 #   └── backend/
 #       └── main.py
 # This import will correctly find models.py.
-from backend.models import User, UserInDB, Task, TaskCompletion, Transaction, Notification, UserRole, TaskSubmission, TransactionType, TransactionStatus, NotificationType
+from models import User, UserInDB, Task, TaskCompletion, Transaction, Notification, UserRole, TaskSubmission, TransactionType, TransactionStatus, NotificationType
 
 # Configure logging for production
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
