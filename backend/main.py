@@ -257,7 +257,7 @@ origins = [
     "http://localhost",
     "http://localhost:8000",
     "http://localhost:3000",
-    "https://money-makingplatformbyequitybank.onrender.com"
+    "https://money-makingplatformbyequitybankand.onrender.com"
 ]
 
 app.add_middleware(
