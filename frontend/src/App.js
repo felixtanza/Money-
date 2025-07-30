@@ -50,6 +50,7 @@ const AuthPage = ({ onLogin }) => {
   useEffect(() => {
     if (!isLogin) {
       const urlParams = new URLSearchParams(window.location.search);
+      // FIX: Changed 'url.get' to 'urlParams.get'
       const referralFromUrl = urlParams.get('ref');
       if (referralFromUrl) {
         setFormData((prev) => ({
@@ -1642,7 +1643,7 @@ const Dashboard = ({ user, onLogout }) => {
                 <h3>🚀 Activate Your Account</h3>
                 <p>Deposit KSH 500 to unlock all features and start earning money through tasks!</p>
                 <button className="btn-primary" onClick={() => setShowDepositModal(true)}>
-                  Activate Now
+                  Activate Account
                 </button>
               </div>
             )}
