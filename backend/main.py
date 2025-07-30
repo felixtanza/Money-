@@ -842,12 +842,12 @@ async def mpesa_b2c_callback(request: Request):
 
     if not transaction:
         logging.warning(f"B2C Callback: Transaction not found for Occasion/OriginatorConversationID: {transaction_id_from_occasion}/{originator_conversation_id}. Maybe already processed or invalid.")
-        return JSONResponse(content={"ResultCode": 0, "ResultDesc": "Callback received"}, status_code=200)
+        return JSONResponse({"ResultCode": 0, "ResultDesc": "Callback received"}, status_code=200)
 
     user = await db.users.find_one({"user_id": transaction['user_id']})
     if not user:
         logging.error(f"B2C Callback: User not found for transaction {transaction['transaction_id']}. Cannot update wallet.")
-        return JSONResponse(content={"ResultCode": 0, "ResultDesc": "Callback received"}, status_code=200)
+        return JSONResponse({"ResultCode": 0, "ResultDesc": "Callback received"}, status_code=200)
 
     update_fields = {
         "processed_at": datetime.utcnow(),
@@ -899,7 +899,7 @@ async def mpesa_b2c_callback(request: Request):
         {"$set": update_fields}
     )
 
-    return JSONResponse(content={"ResultCode": 0, "ResultDesc": "Callback received"}, status_code=200)
+    return JSONResponse({"ResultCode": 0, "ResultDesc": "Callback received"}, status_code=200)
 
 @app.post("/api/payments/b2c-timeout", summary="M-Pesa B2C Timeout Callback Endpoint (Internal)")
 async def mpesa_b2c_timeout_callback(request: Request):
@@ -922,12 +922,12 @@ async def mpesa_b2c_timeout_callback(request: Request):
 
     if not transaction:
         logging.warning(f"B2C Timeout: Transaction not found for Occasion/OriginatorConversationID: {transaction_id_from_occasion}/{originator_conversation_id}. Maybe already processed or invalid.")
-        return JSONResponse(content={"ResultCode": 0, "ResultDesc": "Timeout Callback received"}, status_code=200)
+        return JSONResponse({"ResultCode": 0, "ResultDesc": "Timeout Callback received"}, status_code=200)
 
     user = await db.users.find_one({"user_id": transaction['user_id']})
     if not user:
         logging.error(f"B2C Timeout: User not found for transaction {transaction['transaction_id']}. Cannot update wallet.")
-        return JSONResponse(content={"ResultCode": 0, "ResultDesc": "Timeout Callback received"}, status_code=200)
+        return JSONResponse({"ResultCode": 0, "ResultDesc": "Timeout Callback received"}, status_code=200)
 
     update_fields = {
         "processed_at": datetime.utcnow(),
@@ -957,7 +957,7 @@ async def mpesa_b2c_timeout_callback(request: Request):
     })
     logging.warning(f"B2C Timeout: Transaction {transaction['transaction_id']} for User {user['user_id']} timed out. Amount {refund_amount:.2f} refunded.")
 
-    return JSONResponse(content={"ResultCode": 0, "ResultDesc": "Timeout Callback received"}, status_code=200)
+    return JSONResponse({"ResultCode": 0, "ResultDesc": "Timeout Callback received"}, status_code=200)
 
 # --- Task Management Routes ---
 @app.post("/api/tasks", status_code=status.HTTP_201_CREATED, summary="Create a new task (Admin Only)")
@@ -1109,9 +1109,9 @@ async def update_user_profile(
 
 @app.put("/api/user/change-password", summary="Change user password")
 async def change_password(
+    current_user: Annotated[Dict[str, Any], Depends(get_current_user)], # Moved to the start
     old_password: str = Form(...),
-    new_password: str = Form(...),
-    current_user: Annotated[Dict[str, Any], Depends(get_current_user)]
+    new_password: str = Form(...)
 ):
     if not verify_password(old_password, current_user['password']):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid old password.")
@@ -1129,10 +1129,10 @@ async def change_password(
 # --- Admin Endpoints (Protected by RoleChecker) ---
 @app.get("/api/admin/users", response_model=List[UserProfile], summary="Get all users (Admin Only)")
 async def get_all_users(
+    current_user: Annotated[Dict[str, Any], Depends(get_current_user)], # Moved to the start
+    has_admin_role: Annotated[bool, Depends(RoleChecker(["admin"]))], # Moved to the start
     skip: int = 0,
-    limit: int = 100,
-    current_user: Annotated[Dict[str, Any], Depends(get_current_user)],
-    has_admin_role: Annotated[bool, Depends(RoleChecker(["admin"]))] # Requires 'admin' role
+    limit: int = 100
 ):
     users_cursor = db.users.find({}).skip(skip).limit(limit)
     users = []
@@ -1143,9 +1143,9 @@ async def get_all_users(
 @app.put("/api/admin/users/{user_id}/role", response_model=UserProfile, summary="Update user role (Admin Only)")
 async def update_user_role(
     user_id: str,
-    new_role: str = Form(...),
-    current_user: Annotated[Dict[str, Any], Depends(get_current_user)],
-    has_admin_role: Annotated[bool, Depends(RoleChecker(["admin"]))] # Requires 'admin' role
+    current_user: Annotated[Dict[str, Any], Depends(get_current_user)], # Moved to the start
+    has_admin_role: Annotated[bool, Depends(RoleChecker(["admin"]))], # Moved to the start
+    new_role: str = Form(...)
 ):
     if new_role not in ["user", "admin"]: # Define allowed roles
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid role specified. Must be 'user' or 'admin'.")
@@ -1163,12 +1163,12 @@ async def update_user_role(
 
 @app.get("/api/admin/transactions", summary="Get all transactions (Admin Only)")
 async def get_all_transactions(
+    current_user: Annotated[Dict[str, Any], Depends(get_current_user)], # Moved to the start
+    has_admin_role: Annotated[bool, Depends(RoleChecker(["admin"]))], # Moved to the start
     skip: int = 0,
     limit: int = 100,
     transaction_type: Optional[str] = None,
-    status_filter: Optional[str] = None, # Renamed to avoid conflict with HTTP status
-    current_user: Annotated[Dict[str, Any], Depends(get_current_user)],
-    has_admin_role: Annotated[bool, Depends(RoleChecker(["admin"]))] # Requires 'admin' role
+    status_filter: Optional[str] = None # Renamed to avoid conflict with HTTP status
 ):
     query = {}
     if transaction_type:
