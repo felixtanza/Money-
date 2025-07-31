@@ -10,7 +10,9 @@ const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true); // Initial loading state for auth check
   const [error, setError] = useState(null);
 
-  const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8000';
+  // Fix: Use window.__backend_url if available, fallback to process.env, then localhost
+  // This resolves the "ReferenceError: process is not defined" in browser environments.
+  const BACKEND_URL = window.__backend_url || process.env.REACT_APP_BACKEND_URL || 'http://localhost:8000';
 
   // Function to fetch current user data
   const fetchCurrentUser = async (authToken) => {
