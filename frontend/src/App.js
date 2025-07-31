@@ -1,5 +1,5 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
-import { LogIn, UserPlus, Home, List, DollarSign, Bell, Settings, Wallet, RefreshCcw, CheckCircle, XCircle, Loader2, Users, Send, FileText, LayoutDashboard } from 'lucide-react'; // Importing new icons for admin panel
+import { LogIn, UserPlus, Home, List, DollarSign, Bell, Settings, Wallet, RefreshCcw, CheckCircle, XCircle, Loader2, Users, Send, FileText, LayoutDashboard, Info } from 'lucide-react'; // Importing new icons for admin panel
 
 // --- Context for User and Authentication State ---
 const AuthContext = createContext(null);
@@ -9,12 +9,16 @@ const AuthProvider = ({ children }) => {
   const [token, setToken] = useState(localStorage.getItem('token')); // Load token from local storage
   const [loading, setLoading] = useState(true); // Initial loading state for auth check
   const [error, setError] = useState(null);
+  const [notification, setNotification] = useState(null); // New state for global notifications {message, type}
 
-  // Updated: Use window.__backend_url if available, otherwise default to localhost.
-  // This completely bypasses process.env for better browser compatibility.
-  const BACKEND_URL = typeof window !== 'undefined' && window.__backend_url
-    ? window.__backend_url
-    : 'http://localhost:8000'; // Fallback for local development
+  // UPDATED: Directly set the backend URL to your Render deployment
+  const BACKEND_URL = 'https://money-makingplatformbyequitybank.onrender.com';
+
+  // Function to display a notification
+  const showNotification = (message, type = 'info') => {
+    setNotification({ message, type });
+    setTimeout(() => setNotification(null), 5000); // Auto-hide after 5 seconds
+  };
 
   // Function to fetch current user data
   const fetchCurrentUser = async (authToken) => {
@@ -37,14 +41,17 @@ const AuthProvider = ({ children }) => {
       } else if (response.status === 401) {
         // Token expired or invalid, clear it
         logout();
+        showNotification('Session expired. Please log in again.', 'error');
       } else {
         const errorData = await response.json();
         setError(errorData.detail || 'Failed to fetch user data.');
+        showNotification(errorData.detail || 'Failed to fetch user data.', 'error');
         setUser(null);
       }
     } catch (err) {
       console.error('Error fetching current user:', err);
       setError('Network error or unable to connect to backend.');
+      showNotification('Network error or unable to connect to backend.', 'error');
       setUser(null);
     } finally {
       setLoading(false);
@@ -69,15 +76,18 @@ const AuthProvider = ({ children }) => {
         localStorage.setItem('token', data.token); // Store token
         setToken(data.token);
         setUser(data.user);
+        showNotification(data.message, 'success');
         return { success: true, message: data.message };
       } else {
         const errorData = await response.json();
         setError(errorData.detail || 'Login failed.');
+        showNotification(errorData.detail || 'Login failed.', 'error');
         return { success: false, message: errorData.detail || 'Login failed.' };
       }
     } catch (err) {
       console.error('Login error:', err);
       setError('Network error or unable to connect to backend.');
+      showNotification('Network error or unable to connect to backend.', 'error');
       return { success: false, message: 'Network error or unable to connect to backend.' };
     } finally {
       setLoading(false);
@@ -91,6 +101,7 @@ const AuthProvider = ({ children }) => {
     setUser(null);
     setError(null);
     setLoading(false);
+    showNotification('You have been logged out.', 'info');
   };
 
   // Initial check on component mount
@@ -98,18 +109,67 @@ const AuthProvider = ({ children }) => {
     fetchCurrentUser(token);
   }, [token]); // Re-fetch if token changes
 
-  const authContextValue = { user, token, loading, error, login, logout, fetchCurrentUser, BACKEND_URL };
+  const authContextValue = { user, token, loading, error, login, logout, fetchCurrentUser, BACKEND_URL, showNotification };
 
   return (
     <AuthContext.Provider value={authContextValue}>
       {children}
+      {notification && (
+        <NotificationMessage
+          message={notification.message}
+          type={notification.type}
+          onClose={() => setNotification(null)}
+        />
+      )}
     </AuthContext.Provider>
   );
 };
 
+// --- NotificationMessage Component (New) ---
+const NotificationMessage = ({ message, type, onClose }) => {
+  let bgColor, textColor, icon;
+  switch (type) {
+    case 'success':
+      bgColor = 'bg-green-100 border-green-400';
+      textColor = 'text-green-700';
+      icon = <CheckCircle className="h-5 w-5 mr-2" />;
+      break;
+    case 'error':
+      bgColor = 'bg-red-100 border-red-400';
+      textColor = 'text-red-700';
+      icon = <XCircle className="h-5 w-5 mr-2" />;
+      break;
+    case 'info':
+      bgColor = 'bg-blue-100 border-blue-400';
+      textColor = 'text-blue-700';
+      icon = <Info className="h-5 w-5 mr-2" />;
+      break;
+    case 'warning':
+      bgColor = 'bg-yellow-100 border-yellow-400';
+      textColor = 'text-yellow-700';
+      icon = <Bell className="h-5 w-5 mr-2" />;
+      break;
+    default:
+      bgColor = 'bg-gray-100 border-gray-400';
+      textColor = 'text-gray-700';
+      icon = <Info className="h-5 w-5 mr-2" />;
+  }
+
+  return (
+    <div className={`fixed bottom-4 right-4 p-4 rounded-lg shadow-lg flex items-center ${bgColor} ${textColor} z-50`} role="alert">
+      {icon}
+      <span className="block sm:inline">{message}</span>
+      <button onClick={onClose} className="ml-4 text-current opacity-75 hover:opacity-100">
+        <XCircle className="h-4 w-4" />
+      </button>
+    </div>
+  );
+};
+
+
 // --- Main App Component ---
 function App() {
-  const { user, token, loading, error, logout } = useContext(AuthContext);
+  const { user, token, loading, error, logout, showNotification } = useContext(AuthContext);
   const [currentPage, setCurrentPage] = useState('home'); // 'home', 'tasks', 'payments', 'notifications', 'settings', 'admin'
 
   if (loading) {
@@ -129,15 +189,7 @@ function App() {
     <div className={`min-h-screen flex flex-col ${user?.theme === 'dark' ? 'dark bg-gray-900 text-gray-100' : 'bg-gray-100 text-gray-900'}`}>
       <Navbar currentPage={currentPage} setCurrentPage={setCurrentPage} user={user} logout={logout} />
       <main className="flex-grow p-4 md:p-8">
-        {error && (
-          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg relative mb-4" role="alert">
-            <strong className="font-bold">Error!</strong>
-            <span className="block sm:inline ml-2">
-              {/* Ensure error is always rendered as a string */}
-              {typeof error === 'string' ? error : JSON.stringify(error)}
-            </span>
-          </div>
-        )}
+        {/* Global error display is now handled by the NotificationMessage component in AuthProvider */}
         {currentPage === 'home' && <DashboardPage />}
         {currentPage === 'tasks' && <TasksPage />}
         {currentPage === 'payments' && <PaymentsPage />}
@@ -233,18 +285,16 @@ const AuthPage = ({ setCurrentPage }) => {
 
 // --- LoginForm Component ---
 const LoginForm = () => {
-  const { login, error } = useContext(AuthContext);
+  const { login, showNotification } = useContext(AuthContext); // Use showNotification
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState('');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-    setMessage('');
     const result = await login(username, password);
-    setMessage(result.message);
+    // Notification is now handled by AuthContext's login function
     setLoading(false);
   };
 
@@ -270,11 +320,6 @@ const LoginForm = () => {
           required
         />
       </div>
-      {message && (
-        <div className={`text-sm ${error ? 'text-red-600' : 'text-green-600'} text-center`}>
-          {message}
-        </div>
-      )}
       <button
         type="submit"
         className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 transition duration-200 flex items-center justify-center"
@@ -289,7 +334,7 @@ const LoginForm = () => {
 
 // --- RegisterForm Component ---
 const RegisterForm = ({ setIsLogin }) => {
-  const { BACKEND_URL } = useContext(AuthContext);
+  const { BACKEND_URL, showNotification } = useContext(AuthContext); // Use showNotification
   const [formData, setFormData] = useState({
     username: '',
     email: '',
@@ -299,8 +344,6 @@ const RegisterForm = ({ setIsLogin }) => {
     referral_code: '',
   });
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState('');
-  const [isError, setIsError] = useState(false);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -310,8 +353,6 @@ const RegisterForm = ({ setIsLogin }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-    setMessage('');
-    setIsError(false);
 
     try {
       const response = await fetch(`${BACKEND_URL}/api/auth/register`, {
@@ -325,18 +366,15 @@ const RegisterForm = ({ setIsLogin }) => {
       const data = await response.json();
 
       if (response.ok) {
-        setMessage(data.message + " Please log in.");
-        setIsError(false);
+        showNotification(data.message + " Please log in.", 'success');
         // Optionally, automatically switch to login form after successful registration
         setTimeout(() => setIsLogin(true), 2000);
       } else {
-        setMessage(data.detail || 'Registration failed.');
-        setIsError(true);
+        showNotification(data.detail || 'Registration failed.', 'error');
       }
     } catch (err) {
       console.error('Registration error:', err);
-      setMessage('Network error or unable to connect to backend.');
-      setIsError(true);
+      showNotification('Network error or unable to connect to backend.', 'error');
     } finally {
       setLoading(false);
     }
@@ -368,11 +406,6 @@ const RegisterForm = ({ setIsLogin }) => {
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Referral Code (Optional)</label>
         <input type="text" name="referral_code" value={formData.referral_code} onChange={handleChange} className="w-full px-4 py-2 border rounded-md bg-gray-50 dark:bg-gray-700 dark:text-gray-100" />
       </div>
-      {message && (
-        <div className={`text-sm ${isError ? 'text-red-600' : 'text-green-600'} text-center`}>
-          {message}
-        </div>
-      )}
       <button
         type="submit"
         className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 transition duration-200 flex items-center justify-center"
@@ -387,7 +420,7 @@ const RegisterForm = ({ setIsLogin }) => {
 
 // --- DashboardPage Component ---
 const DashboardPage = () => {
-  const { user, token, BACKEND_URL, fetchCurrentUser } = useContext(AuthContext);
+  const { user, token, BACKEND_URL, fetchCurrentUser, showNotification } = useContext(AuthContext);
   const [dashboardStats, setDashboardStats] = useState(null);
   const [loadingStats, setLoadingStats] = useState(true);
   const [statsError, setStatsError] = useState(null);
@@ -413,16 +446,18 @@ const DashboardPage = () => {
         } else {
           const errorData = await response.json();
           setStatsError(errorData.detail || 'Failed to fetch dashboard stats.');
+          showNotification(errorData.detail || 'Failed to fetch dashboard stats.', 'error');
         }
       } catch (err) {
         console.error('Error fetching dashboard stats:', err);
         setStatsError('Network error while fetching dashboard stats.');
+        showNotification('Network error while fetching dashboard stats.', 'error');
       } finally {
         setLoadingStats(false);
       }
     };
     getDashboardStats();
-  }, [token, BACKEND_URL]);
+  }, [token, BACKEND_URL, showNotification]);
 
   return (
     <div className="container mx-auto p-4 bg-white dark:bg-gray-800 rounded-lg shadow-md">
@@ -483,12 +518,10 @@ const StatCard = ({ title, value, icon }) => (
 
 // --- TasksPage Component ---
 const TasksPage = () => {
-  const { user, token, BACKEND_URL, fetchCurrentUser } = useContext(AuthContext);
+  const { user, token, BACKEND_URL, fetchCurrentUser, showNotification } = useContext(AuthContext); // Use showNotification
   const [tasks, setTasks] = useState([]);
   const [loadingTasks, setLoadingTasks] = useState(true);
   const [tasksError, setTasksError] = useState(null);
-  const [submissionMessage, setSubmissionMessage] = useState('');
-  const [submissionError, setSubmissionError] = useState(false);
 
   useEffect(() => {
     const fetchTasks = async () => {
@@ -511,20 +544,20 @@ const TasksPage = () => {
         } else {
           const errorData = await response.json();
           setTasksError(errorData.detail || 'Failed to fetch tasks.');
+          showNotification(errorData.detail || 'Failed to fetch tasks.', 'error'); // Notify on fetch error
         }
       } catch (err) {
         console.error('Error fetching tasks:', err);
         setTasksError('Network error while fetching tasks.');
+        showNotification('Network error while fetching tasks.', 'error'); // Notify on network error
       } finally {
         setLoadingTasks(false);
       }
     };
     fetchTasks();
-  }, [token, BACKEND_URL, submissionMessage]); // Re-fetch tasks after a submission
+  }, [token, BACKEND_URL, showNotification]); // Re-fetch tasks after a submission
 
   const handleTaskSubmit = async (taskId, completionData) => {
-    setSubmissionMessage('');
-    setSubmissionError(false);
     try {
       const response = await fetch(`${BACKEND_URL}/api/tasks/complete`, {
         method: 'POST',
@@ -537,17 +570,14 @@ const TasksPage = () => {
 
       const data = await response.json();
       if (response.ok) {
-        setSubmissionMessage(data.message);
-        setSubmissionError(false);
+        showNotification(data.message, 'success');
         fetchCurrentUser(token); // Update user balance/status after task completion
       } else {
-        setSubmissionMessage(data.detail || 'Task submission failed.');
-        setSubmissionError(true);
+        showNotification(data.detail || 'Task submission failed.', 'error');
       }
     } catch (err) {
       console.error('Error submitting task:', err);
-      setSubmissionMessage('Network error or unable to connect to backend for task submission.');
-      setSubmissionError(true);
+      showNotification('Network error or unable to connect to backend for task submission.', 'error');
     }
   };
 
@@ -565,12 +595,6 @@ const TasksPage = () => {
   return (
     <div className="container mx-auto p-4 bg-white dark:bg-gray-800 rounded-lg shadow-md">
       <h2 className="text-3xl font-bold mb-6 text-blue-600 dark:text-blue-400">Available Tasks</h2>
-      {submissionMessage && (
-        <div className={`px-4 py-3 rounded-lg relative mb-4 ${submissionError ? 'bg-red-100 border border-red-400 text-red-700' : 'bg-green-100 border border-green-400 text-green-700'}`} role="alert">
-          <strong className="font-bold">{submissionError ? 'Error!' : 'Success!'}</strong>
-          <span className="block sm:inline ml-2">{submissionMessage}</span>
-        </div>
-      )}
       {loadingTasks ? (
         <div className="flex items-center justify-center p-4">
           <Loader2 className="animate-spin h-8 w-8 text-blue-500" />
@@ -689,23 +713,18 @@ const TaskCard = ({ task, onTaskSubmit }) => {
 
 // --- PaymentsPage Component ---
 const PaymentsPage = () => {
-  const { user, token, BACKEND_URL, fetchCurrentUser } = useContext(AuthContext);
+  const { user, token, BACKEND_URL, fetchCurrentUser, showNotification } = useContext(AuthContext); // Use showNotification
   const [amount, setAmount] = useState('');
   const [phone, setPhone] = useState(user?.phone || '');
   const [paymentType, setPaymentType] = useState('deposit'); // 'deposit' or 'withdraw'
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState('');
-  const [isError, setIsError] = useState(false);
 
   const handlePaymentSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-    setMessage('');
-    setIsError(false);
 
     if (!token) {
-      setMessage('You must be logged in to perform this action.');
-      setIsError(true);
+      showNotification('You must be logged in to perform this action.', 'error');
       setLoading(false);
       return;
     }
@@ -725,18 +744,15 @@ const PaymentsPage = () => {
 
       const data = await response.json();
       if (response.ok) {
-        setMessage(data.message);
-        setIsError(false);
+        showNotification(data.message, 'success');
         setAmount(''); // Clear amount after successful initiation
         fetchCurrentUser(token); // Refresh user data to show updated balance (if deposit was auto-approved or withdrawal deducted)
       } else {
-        setMessage(data.detail || `Failed to ${paymentType}.`);
-        setIsError(true);
+        showNotification(data.detail || `Failed to ${paymentType}.`, 'error');
       }
     } catch (err) {
       console.error(`Error during ${paymentType}:`, err);
-      setMessage(`Network error or unable to connect to backend for ${paymentType}.`);
-      setIsError(true);
+      showNotification(`Network error or unable to connect to backend for ${paymentType}.`, 'error');
     } finally {
       setLoading(false);
     }
@@ -787,11 +803,6 @@ const PaymentsPage = () => {
             required
           />
         </div>
-        {message && (
-          <div className={`text-sm ${isError ? 'text-red-600' : 'text-green-600'} text-center`}>
-            {message}
-          </div>
-        )}
         <button
           type="submit"
           className="w-full bg-blue-600 text-white py-3 px-4 rounded-md hover:bg-blue-700 transition duration-200 flex items-center justify-center font-semibold"
@@ -807,7 +818,7 @@ const PaymentsPage = () => {
 
 // --- NotificationsPage Component ---
 const NotificationsPage = () => {
-  const { token, BACKEND_URL } = useContext(AuthContext);
+  const { token, BACKEND_URL, showNotification } = useContext(AuthContext); // Use showNotification
   const [notifications, setNotifications] = useState([]);
   const [loadingNotifications, setLoadingNotifications] = useState(true);
   const [notificationsError, setNotificationsError] = useState(null);
@@ -834,16 +845,18 @@ const NotificationsPage = () => {
         } else {
           const errorData = await response.json();
           setNotificationsError(errorData.detail || 'Failed to fetch notifications.');
+          showNotification(errorData.detail || 'Failed to fetch notifications.', 'error'); // Notify on fetch error
         }
       } catch (err) {
         console.error('Error fetching notifications:', err);
         setNotificationsError('Network error while fetching notifications.');
+        showNotification('Network error while fetching notifications.', 'error'); // Notify on network error
       } finally {
         setLoadingNotifications(false);
       }
     };
     fetchNotifications();
-  }, [token, BACKEND_URL, refreshTrigger]);
+  }, [token, BACKEND_URL, refreshTrigger, showNotification]);
 
   const handleMarkAsRead = async (notificationId) => {
     try {
@@ -858,12 +871,15 @@ const NotificationsPage = () => {
         // Optimistically update UI or re-fetch
         setNotifications(prev => prev.map(n => n.notification_id === notificationId ? { ...n, read: true } : n));
         setRefreshTrigger(prev => prev + 1); // Trigger re-fetch to ensure consistency
+        showNotification('Notification marked as read.', 'success'); // Notify on success
       } else {
         const errorData = await response.json();
-        console.error(errorData.detail || 'Failed to mark notification as read.'); // Changed from alert
+        console.error(errorData.detail || 'Failed to mark notification as read.');
+        showNotification(errorData.detail || 'Failed to mark notification as read.', 'error'); // Notify on error
       }
     } catch (err) {
-      console.error('Error marking notification as read:', err); // Changed from alert
+      console.error('Error marking notification as read:', err);
+      showNotification('Network error marking notification as read.', 'error'); // Notify on network error
     }
   };
 
@@ -919,11 +935,9 @@ const NotificationsPage = () => {
 
 // --- SettingsPage Component ---
 const SettingsPage = () => {
-  const { user, token, BACKEND_URL, fetchCurrentUser } = useContext(AuthContext);
+  const { user, token, BACKEND_URL, fetchCurrentUser, showNotification } = useContext(AuthContext); // Use showNotification
   const [theme, setTheme] = useState(user?.theme || 'light');
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState('');
-  const [isError, setIsError] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -933,8 +947,6 @@ const SettingsPage = () => {
 
   const handleThemeChange = async (newTheme) => {
     setLoading(true);
-    setMessage('');
-    setIsError(false);
     try {
       // Note: Backend's update_user_profile uses Form, so sending as FormData
       const formData = new FormData();
@@ -950,18 +962,15 @@ const SettingsPage = () => {
       });
       const data = await response.json();
       if (response.ok) {
-        setMessage(data.message);
-        setIsError(false);
+        showNotification(data.message, 'success'); // Notify on success
         setTheme(newTheme);
         fetchCurrentUser(token); // Update global user state
       } else {
-        setMessage(data.detail || 'Failed to update theme.');
-        setIsError(true);
+        showNotification(data.detail || 'Failed to update theme.', 'error'); // Notify on error
       }
     } catch (err) {
       console.error('Error updating theme:', err);
-      setMessage('Network error or unable to connect to backend.');
-      setIsError(true);
+      showNotification('Network error or unable to connect to backend.', 'error'); // Notify on network error
     } finally {
       setLoading(false);
     }
@@ -990,11 +999,6 @@ const SettingsPage = () => {
             </button>
           </div>
         </div>
-        {message && (
-          <div className={`text-sm ${isError ? 'text-red-600' : 'text-green-600'} text-center`}>
-            {message}
-          </div>
-        )}
         {loading && (
           <div className="flex items-center justify-center p-4">
             <Loader2 className="animate-spin h-6 w-6 text-blue-500" />
@@ -1064,12 +1068,10 @@ const AdminPage = () => {
 
 // --- UserManagement Component (Admin) ---
 const UserManagement = () => {
-  const { token, BACKEND_URL } = useContext(AuthContext);
+  const { token, BACKEND_URL, showNotification } = useContext(AuthContext); // Use showNotification
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [message, setMessage] = useState('');
-  const [isMessageError, setIsMessageError] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   useEffect(() => {
@@ -1086,20 +1088,20 @@ const UserManagement = () => {
         } else {
           const errorData = await response.json();
           setError(errorData.detail || 'Failed to fetch users.');
+          showNotification(errorData.detail || 'Failed to fetch users.', 'error'); // Notify on fetch error
         }
       } catch (err) {
         console.error('Error fetching users:', err);
         setError('Network error or unable to connect to backend.');
+        showNotification('Network error or unable to connect to backend.', 'error'); // Notify on network error
       } finally {
         setLoading(false);
       }
     };
     fetchUsers();
-  }, [token, BACKEND_URL, refreshTrigger]);
+  }, [token, BACKEND_URL, refreshTrigger, showNotification]);
 
   const handleUpdateRole = async (userId, newRole) => {
-    setMessage('');
-    setIsMessageError(false);
     try {
       // Note: Backend's update_user_role uses Form, so sending as FormData
       const formData = new FormData();
@@ -1115,29 +1117,20 @@ const UserManagement = () => {
       });
       const data = await response.json();
       if (response.ok) {
-        setMessage(data.message);
-        setIsMessageError(false);
+        showNotification(data.message, 'success'); // Notify on success
         setRefreshTrigger(prev => prev + 1); // Trigger refresh
       } else {
-        setMessage(data.detail || 'Failed to update user role.');
-        setIsMessageError(true);
+        showNotification(data.detail || 'Failed to update user role.', 'error'); // Notify on error
       }
     } catch (err) {
       console.error('Error updating user role:', err);
-      setMessage('Network error updating user role.');
-      setIsMessageError(true);
+      showNotification('Network error updating user role.', 'error'); // Notify on network error
     }
   };
 
   return (
     <div className="bg-gray-50 dark:bg-gray-700 p-6 rounded-lg shadow-inner">
       <h3 className="text-2xl font-semibold mb-4 text-gray-800 dark:text-gray-200">User Management</h3>
-      {message && (
-        <div className={`px-4 py-3 rounded-lg relative mb-4 ${isMessageError ? 'bg-red-100 border border-red-400 text-red-700' : 'bg-green-100 border border-green-400 text-green-700'}`} role="alert">
-          <strong className="font-bold">{isMessageError ? 'Error!' : 'Success!'}</strong>
-          <span className="block sm:inline ml-2">{message}</span>
-        </div>
-      )}
       {loading ? (
         <div className="flex items-center justify-center p-4">
           <Loader2 className="animate-spin h-8 w-8 text-blue-500" />
@@ -1200,7 +1193,7 @@ const UserManagement = () => {
 
 // --- TransactionViewer Component (Admin) ---
 const TransactionViewer = () => {
-  const { token, BACKEND_URL } = useContext(AuthContext);
+  const { token, BACKEND_URL, showNotification } = useContext(AuthContext); // Use showNotification
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -1219,16 +1212,18 @@ const TransactionViewer = () => {
         } else {
           const errorData = await response.json();
           setError(errorData.detail || 'Failed to fetch transactions.');
+          showNotification(errorData.detail || 'Failed to fetch transactions.', 'error'); // Notify on fetch error
         }
       } catch (err) {
         console.error('Error fetching transactions:', err);
         setError('Network error or unable to connect to backend.');
+        showNotification('Network error or unable to connect to backend.', 'error'); // Notify on network error
       } finally {
         setLoading(false);
       }
     };
     fetchTransactions();
-  }, [token, BACKEND_URL]);
+  }, [token, BACKEND_URL, showNotification]);
 
   return (
     <div className="bg-gray-50 dark:bg-gray-700 p-6 rounded-lg shadow-inner">
@@ -1285,19 +1280,15 @@ const TransactionViewer = () => {
 
 // --- BroadcastNotificationSender Component (Admin) ---
 const BroadcastNotificationSender = () => {
-  const { token, BACKEND_URL } = useContext(AuthContext);
+  const { token, BACKEND_URL, showNotification } = useContext(AuthContext); // Use showNotification
   const [title, setTitle] = useState('');
   const [message, setMessage] = useState('');
   const [notificationType, setNotificationType] = useState('INFO');
   const [loading, setLoading] = useState(false);
-  const [responseMessage, setResponseMessage] = useState('');
-  const [isError, setIsError] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
-    setResponseMessage('');
-    setIsError(false);
 
     try {
       const apiResponse = await fetch(`${BACKEND_URL}/api/admin/notifications/broadcast`, {
@@ -1311,18 +1302,15 @@ const BroadcastNotificationSender = () => {
 
       const data = await apiResponse.json();
       if (apiResponse.ok) {
-        setResponseMessage(data.message);
-        setIsError(false);
+        showNotification(data.message, 'success'); // Notify on success
         setTitle('');
         setMessage('');
       } else {
-        setResponseMessage(data.detail || 'Failed to send broadcast notification.');
-        setIsError(true);
+        showNotification(data.detail || 'Failed to send broadcast notification.', 'error'); // Notify on error
       }
     } catch (err) {
       console.error('Error sending broadcast:', err);
-      setResponseMessage('Network error or unable to connect to backend.');
-      setIsError(true);
+      showNotification('Network error or unable to connect to backend.', 'error'); // Notify on network error
     } finally {
       setLoading(false);
     }
@@ -1365,11 +1353,6 @@ const BroadcastNotificationSender = () => {
             <option value="ERROR">Error</option>
           </select>
         </div>
-        {responseMessage && (
-          <div className={`text-sm ${isError ? 'text-red-600' : 'text-green-600'} text-center`}>
-            {responseMessage}
-          </div>
-        )}
         <button
           type="submit"
           className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 transition duration-200 flex items-center justify-center"
@@ -1385,12 +1368,10 @@ const BroadcastNotificationSender = () => {
 
 // --- TaskSubmissionReview Component (Admin) ---
 const TaskSubmissionReview = () => {
-  const { token, BACKEND_URL } = useContext(AuthContext);
+  const { token, BACKEND_URL, showNotification } = useContext(AuthContext); // Use showNotification
   const [submissions, setSubmissions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [message, setMessage] = useState('');
-  const [isMessageError, setIsMessageError] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   useEffect(() => {
@@ -1407,20 +1388,20 @@ const TaskSubmissionReview = () => {
         } else {
           const errorData = await response.json();
           setError(errorData.detail || 'Failed to fetch pending submissions.');
+          showNotification(errorData.detail || 'Failed to fetch pending submissions.', 'error'); // Notify on fetch error
         }
       } catch (err) {
         console.error('Error fetching pending submissions:', err);
         setError('Network error or unable to connect to backend.');
+        showNotification('Network error or unable to connect to backend.', 'error'); // Notify on network error
       } finally {
         setLoading(false);
       }
     };
     fetchSubmissions();
-  }, [token, BACKEND_URL, refreshTrigger]);
+  }, [token, BACKEND_URL, refreshTrigger, showNotification]);
 
   const handleReviewAction = async (submissionId, action) => { // 'approve' or 'reject'
-    setMessage('');
-    setIsMessageError(false);
     try {
       const response = await fetch(`${BACKEND_URL}/api/admin/task-submissions/${submissionId}/${action}`, {
         method: 'PUT',
@@ -1431,29 +1412,20 @@ const TaskSubmissionReview = () => {
       });
       const data = await response.json();
       if (response.ok) {
-        setMessage(data.message);
-        setIsMessageError(false);
+        showNotification(data.message, 'success'); // Notify on success
         setRefreshTrigger(prev => prev + 1); // Trigger refresh
       } else {
-        setMessage(data.detail || `Failed to ${action} submission.`);
-        setIsMessageError(true);
+        showNotification(data.detail || `Failed to ${action} submission.`, 'error'); // Notify on error
       }
     } catch (err) {
       console.error(`Error ${action}ing submission:`, err);
-      setMessage(`Network error ${action}ing submission.`);
-      setIsMessageError(true);
+      showNotification(`Network error ${action}ing submission.`, 'error'); // Notify on network error
     }
   };
 
   return (
     <div className="bg-gray-50 dark:bg-gray-700 p-6 rounded-lg shadow-inner">
       <h3 className="text-2xl font-semibold mb-4 text-gray-800 dark:text-gray-200">Pending Task Submissions</h3>
-      {message && (
-        <div className={`px-4 py-3 rounded-lg relative mb-4 ${isMessageError ? 'bg-red-100 border border-red-400 text-red-700' : 'bg-green-100 border border-green-400 text-green-700'}`} role="alert">
-          <strong className="font-bold">{isMessageError ? 'Error!' : 'Success!'}</strong>
-          <span className="block sm:inline ml-2">{message}</span>
-        </div>
-      )}
       {loading ? (
         <div className="flex items-center justify-center p-4">
           <Loader2 className="animate-spin h-8 w-8 text-blue-500" />
