@@ -354,13 +354,21 @@ const RegisterForm = ({ setIsLogin }) => {
     e.preventDefault();
     setLoading(true);
 
+    // Trim phone number and ensure it's digits-only before sending
+    const cleanedPhone = formData.phone.replace(/\s/g, '').trim(); // Remove spaces and trim
+    if (!/^254\d{9}$/.test(cleanedPhone)) {
+      showNotification("Invalid phone number format. Must be 254XXXXXXXXX (e.g., 254712345678).", 'error');
+      setLoading(false);
+      return;
+    }
+
     try {
       const response = await fetch(`${BACKEND_URL}/api/auth/register`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({ ...formData, phone: cleanedPhone }), // Send cleaned phone
       });
 
       const data = await response.json();
@@ -370,11 +378,15 @@ const RegisterForm = ({ setIsLogin }) => {
         // Optionally, automatically switch to login form after successful registration
         setTimeout(() => setIsLogin(true), 2000);
       } else {
-        showNotification(data.detail || 'Registration failed.', 'error');
+        // Ensure data.detail is a string, or provide a fallback
+        const errorMessage = typeof data.detail === 'string' ? data.detail : 'Registration failed. Please check your inputs.';
+        showNotification(errorMessage, 'error');
       }
     } catch (err) {
       console.error('Registration error:', err);
-      showNotification('Network error or unable to connect to backend.', 'error');
+      // Ensure error message is a string
+      const networkErrorMessage = typeof err.message === 'string' ? err.message : 'Network error or unable to connect to backend.';
+      showNotification(networkErrorMessage, 'error');
     } finally {
       setLoading(false);
     }
