@@ -10,9 +10,11 @@ const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true); // Initial loading state for auth check
   const [error, setError] = useState(null);
 
-  // Fix: Use window.__backend_url if available, fallback to process.env, then localhost
-  // This resolves the "ReferenceError: process is not defined" in browser environments.
-  const BACKEND_URL = window.__backend_url || process.env.REACT_APP_BACKEND_URL || 'http://localhost:8000';
+  // Updated: Use window.__backend_url if available, otherwise default to localhost.
+  // This completely bypasses process.env for better browser compatibility.
+  const BACKEND_URL = typeof window !== 'undefined' && window.__backend_url
+    ? window.__backend_url
+    : 'http://localhost:8000'; // Fallback for local development
 
   // Function to fetch current user data
   const fetchCurrentUser = async (authToken) => {
@@ -130,7 +132,10 @@ function App() {
         {error && (
           <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg relative mb-4" role="alert">
             <strong className="font-bold">Error!</strong>
-            <span className="block sm:inline ml-2">{error}</span>
+            <span className="block sm:inline ml-2">
+              {/* Ensure error is always rendered as a string */}
+              {typeof error === 'string' ? error : JSON.stringify(error)}
+            </span>
           </div>
         )}
         {currentPage === 'home' && <DashboardPage />}
@@ -855,13 +860,10 @@ const NotificationsPage = () => {
         setRefreshTrigger(prev => prev + 1); // Trigger re-fetch to ensure consistency
       } else {
         const errorData = await response.json();
-        // Using alert for simplicity, replace with custom modal in production
-        alert(errorData.detail || 'Failed to mark notification as read.');
+        console.error(errorData.detail || 'Failed to mark notification as read.'); // Changed from alert
       }
     } catch (err) {
-      console.error('Error marking notification as read:', err);
-      // Using alert for simplicity, replace with custom modal in production
-      alert('Network error marking notification as read.');
+      console.error('Error marking notification as read:', err); // Changed from alert
     }
   };
 
